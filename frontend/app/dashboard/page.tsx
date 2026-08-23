@@ -7,6 +7,8 @@ import { getBatchSummary, listCases, type BatchSummary, type CaseSummary } from 
 import { StatTile } from "@/components/stat-tile";
 import { ProgressRow } from "@/components/progress-row";
 import { StatusBadge } from "@/components/status-badge";
+import { ScheduledActionsPanel } from "@/components/scheduled-actions";
+import { useMerchant } from "@/components/merchant-context";
 import { ArrowRightIcon, ShieldIcon, SwapIcon } from "@/components/icons";
 
 function formatRs(n: number) {
@@ -43,6 +45,7 @@ function useBatchData(batchId: string): LoadState {
 // (statusFilter included) instead of needing manual reset effects.
 function BatchDashboard({ batchId }: { batchId: string }) {
   const { summary, cases, error } = useBatchData(batchId);
+  const { merchantId } = useMerchant();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const visibleCases = useMemo(
@@ -105,6 +108,8 @@ function BatchDashboard({ batchId }: { batchId: string }) {
           </div>
         </div>
       </div>
+
+      {merchantId && <ScheduledActionsPanel key={merchantId} merchantId={merchantId} />}
 
       <section>
         <h2 className="mb-1 text-lg font-medium text-text-primary">Recovery by root cause</h2>
