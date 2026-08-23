@@ -136,6 +136,28 @@ this project's history (see the Phase 1 note above on `test_seed.py`) —
 seeded, not just your most recent batch. Reset with `docker compose down
 -v && docker compose up -d && alembic upgrade head` for a clean slate.
 
+### Run one live voice recovery call
+
+```
+cd backend
+.venv/Scripts/python.exe scripts/run_voice_demo.py cooperative
+.venv/Scripts/python.exe scripts/run_voice_demo.py hostile
+```
+
+`app/execution/voice.py` runs a capped 6-turn Hinglish conversation
+between a Gemini-played recovery agent and a Gemini-played synthetic
+customer whose behavior follows the profile argument (cooperative /
+evasive / unresponsive / hostile), then a separate extraction call
+parses the transcript into `{consent, action, promise_to_pay_date}`.
+This is 7 real Gemini calls per run — mind the quota.
+
+Wired into the batch runner via `execute_voice_call` in
+`app/execution/connectors.py`: the conversation shapes how an outcome is
+*labeled* (e.g. `promise_to_pay` vs generic `success`), but the same
+hidden recoverability model still decides whether money actually moves
+— consistent with every other channel, not a separate "the LLM decides
+the outcome" path.
+
 ### Tests
 
 ```
@@ -179,7 +201,7 @@ npm run dev
 | 2 | Detection layer | Done |
 | 3 | Policy engine (proposal + guardrails) | Done |
 | 4 | Execution layer + batch runner | Done |
-| 5 | Voice recovery channel | Not started |
+| 5 | Voice recovery channel | Done |
 | 6 | B2B receivables flow | Not started |
 | 7 | Audit trail storage + dashboard API | Not started |
 | 8 | Frontend (dashboard, run, case drill-down) | Not started |
