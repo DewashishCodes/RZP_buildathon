@@ -20,13 +20,14 @@ def trigger_batch_run(payload: RunBatchRequest, db: Session = Depends(get_db)):
     customers, cases = generate_batch(n_cases=payload.n_cases, seed=payload.seed)
     for case in cases:
         case["batch_id"] = batch_id
+        case["merchant_id"] = payload.merchant_id
 
     db.bulk_insert_mappings(Customer, customers)
     db.bulk_insert_mappings(Case, cases)
     db.commit()
 
     case_ids = [case["id"] for case in cases]
-    run_batch(db, case_ids=case_ids)
+    run_batch(db, case_ids=case_ids, instant=payload.instant)
 
     summary = batch_summary(db, batch_id)
     return RunBatchResponse(

@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 
 import app.detection.gemini_client as gemini_client_module
 from app.api.main import app
+from app.db.session import SessionLocal
+from app.simulation.merchants import seed_merchants
 from tests.fakes import FakeGeminiClient
 
 client = TestClient(app)
@@ -15,10 +17,19 @@ def _patch_gemini(monkeypatch, response_text='{"action": "retry_now", "params": 
     return fake
 
 
+def _demo_merchant_id() -> str:
+    db = SessionLocal()
+    try:
+        return str(seed_merchants(db)[0].id)
+    finally:
+        db.close()
+
+
 def test_list_cases_filters_by_batch_id(monkeypatch):
     _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
 
-    run_resp = client.post("/batches/run", json={"n_cases": 4, "seed": 3})
+    run_resp = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 4, "seed": 3})
     batch_id = run_resp.json()["batch_id"]
 
     resp = client.get("/cases", params={"batch_id": batch_id})
@@ -27,12 +38,28 @@ def test_list_cases_filters_by_batch_id(monkeypatch):
     cases = resp.json()
     assert len(cases) == 4
     assert all(c["batch_id"] == batch_id for c in cases)
+    assert all(c["merchant_id"] == merchant_id for c in cases)
+
+
+def test_list_cases_filters_by_merchant_id(monkeypatch):
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+
+    client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 3, "seed": 6})
+
+    resp = client.get("/cases", params={"merchant_id": merchant_id})
+
+    assert resp.status_code == 200
+    cases = resp.json()
+    assert len(cases) >= 3
+    assert all(c["merchant_id"] == merchant_id for c in cases)
 
 
 def test_get_case_returns_full_timeline(monkeypatch):
     _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
 
-    run_resp = client.post("/batches/run", json={"n_cases": 3, "seed": 4})
+    run_resp = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 3, "seed": 4})
     batch_id = run_resp.json()["batch_id"]
     cases = client.get("/cases", params={"batch_id": batch_id}).json()
     case_id = cases[0]["id"]

@@ -31,6 +31,7 @@ def get_case_timeline(db: Session, case_id: uuid.UUID) -> dict | None:
 def list_cases(
     db: Session,
     batch_id: uuid.UUID | None = None,
+    merchant_id: uuid.UUID | None = None,
     status: str | None = None,
     case_type: str | None = None,
     limit: int = 100,
@@ -39,9 +40,21 @@ def list_cases(
     stmt = select(Case)
     if batch_id is not None:
         stmt = stmt.where(Case.batch_id == batch_id)
+    if merchant_id is not None:
+        stmt = stmt.where(Case.merchant_id == merchant_id)
     if status is not None:
         stmt = stmt.where(Case.status == status)
     if case_type is not None:
         stmt = stmt.where(Case.type == case_type)
     stmt = stmt.order_by(Case.created_at.desc()).limit(limit).offset(offset)
+    return list(db.execute(stmt).scalars().all())
+
+
+def list_scheduled_cases(db: Session, merchant_id: uuid.UUID | None = None, limit: int = 100) -> list[Case]:
+    """Cases waiting on a deferred follow-up round (non-instant batch
+    mode) - backs the dashboard's "Scheduled actions" panel."""
+    stmt = select(Case).where(Case.next_action_at.is_not(None))
+    if merchant_id is not None:
+        stmt = stmt.where(Case.merchant_id == merchant_id)
+    stmt = stmt.order_by(Case.next_action_at.asc()).limit(limit)
     return list(db.execute(stmt).scalars().all())

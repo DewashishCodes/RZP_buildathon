@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 import app.detection.gemini_client as gemini_client_module
 from app.api.main import app
+from app.db.session import SessionLocal
+from app.simulation.merchants import seed_merchants
 from tests.fakes import FakeGeminiClient
 
 client = TestClient(app)
@@ -20,10 +22,19 @@ def _patch_gemini(monkeypatch, response_text='{"action": "retry_now", "params": 
     return fake
 
 
+def _demo_merchant_id() -> str:
+    db = SessionLocal()
+    try:
+        return str(seed_merchants(db)[0].id)
+    finally:
+        db.close()
+
+
 def test_run_batch_returns_batch_id_and_summary(monkeypatch):
     _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
 
-    resp = client.post("/batches/run", json={"n_cases": 5, "seed": 1})
+    resp = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 5, "seed": 1})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -35,8 +46,9 @@ def test_run_batch_returns_batch_id_and_summary(monkeypatch):
 
 def test_get_batch_summary_after_run(monkeypatch):
     _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
 
-    run_resp = client.post("/batches/run", json={"n_cases": 5, "seed": 2})
+    run_resp = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 5, "seed": 2})
     batch_id = run_resp.json()["batch_id"]
 
     summary_resp = client.get(f"/batches/{batch_id}/summary")
@@ -55,3 +67,18 @@ def test_get_batch_summary_404_for_unknown_batch():
 
     resp = client.get(f"/batches/{uuid.uuid4()}/summary")
     assert resp.status_code == 404
+
+
+def test_run_batch_non_instant_leaves_cases_scheduled(monkeypatch):
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+
+    resp = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 20, "seed": 5, "instant": False})
+
+    assert resp.status_code == 200
+    batch_id = resp.json()["batch_id"]
+    cases = client.get("/cases", params={"batch_id": batch_id}).json()
+    # every case got exactly one round - none should have made it past a
+    # single retry_now attempt to a terminal state this fast, so at least
+    # some must still be "recovering" with a scheduled next_action_at.
+    assert any(c["status"] == "recovering" and c["next_action_at"] is not None for c in cases)

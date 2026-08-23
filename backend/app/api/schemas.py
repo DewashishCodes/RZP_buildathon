@@ -5,9 +5,22 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 
+class MerchantOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+
+    model_config = {"from_attributes": True}
+
+
 class RunBatchRequest(BaseModel):
+    merchant_id: uuid.UUID
     n_cases: int = 200
     seed: int | None = None
+    # False leaves each case's first non-terminal round scheduled
+    # (Case.next_action_at) instead of resolving it fully in this call -
+    # see app/execution/runner.py and POST /jobs/run-due.
+    instant: bool = True
 
 
 class RunBatchResponse(BaseModel):
@@ -74,6 +87,8 @@ class CaseOut(BaseModel):
     recovered_amount: float
     disputed: bool
     batch_id: uuid.UUID | None
+    merchant_id: uuid.UUID | None
+    next_action_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -82,3 +97,23 @@ class CaseTimelineResponse(BaseModel):
     case: CaseOut
     events: list[AuditEventOut]
     attempts: list[AttemptOut]
+
+
+class TicketOut(BaseModel):
+    id: uuid.UUID
+    case_id: uuid.UUID
+    merchant_id: uuid.UUID | None
+    created_at: datetime
+    subject: str
+    priority: str
+    status: str
+    assignee: str
+    reason: str
+
+    model_config = {"from_attributes": True}
+
+
+class RunDueJobsResponse(BaseModel):
+    processed: int
+    reached_terminal: int
+    rescheduled: int
