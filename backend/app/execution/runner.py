@@ -2,12 +2,12 @@
 seeded batch, looping each case through rounds until it reaches a terminal
 status, respecting the guardrails in app/policy/guardrails.py.
 
-Scope note: only payment_failure/mandate_failure cases are run here.
-Receivables already exist in the DB (from Phase 1's generator) but their
-root-cause taxonomy (overdue buckets, disputed) isn't built until Phase 6,
-so running them through detection/policy now would just be rolling
-against a null root_cause - excluded here rather than producing a
-misleading recovery number for them before their taxonomy exists.
+Covers all three leak types - payment_failure, mandate_failure, and (as
+of Phase 6) receivable - through the same code path. Receivables get
+their root_cause from the deterministic due_at/disputed bucketing in
+app/detection/receivables.py rather than the LLM classifier, but from
+here on everything (allowed action subset, guardrails, connectors) is
+already generic across case types.
 
 Time is simulated, not real: each case gets its own `sim_now` clock that
 jumps forward ~25h (or to a retry_scheduled's retry_date, if later) after
@@ -28,21 +28,25 @@ from app.policy.channels import determine_channel
 from app.policy.engine import decide_action
 
 TERMINAL_STATUSES = {"recovered", "written_off", "escalated_human"}
-RUNNER_SCOPE_TYPES = {"payment_failure", "mandate_failure"}
+RUNNER_SCOPE_TYPES = {"payment_failure", "mandate_failure", "receivable"}
 MAX_ROUNDS_PER_CASE = 6
 ROUND_ADVANCE = timedelta(hours=25)
 
 
-def run_batch(db: Session, llm_client=None, now: datetime | None = None) -> dict:
+def run_batch(db: Session, llm_client=None, now: datetime | None = None, case_ids: list | None = None) -> dict:
+    """Runs the full pipeline. If case_ids is given, scopes detection and
+    execution to exactly those cases (used by scenario-specific demo
+    scripts so they don't sweep every accumulated case in the dev DB);
+    otherwise processes every open case of the in-scope types.
+    """
     now = now or datetime.now(timezone.utc)
 
-    run_detection_on_batch(db, llm_client=llm_client)
+    run_detection_on_batch(db, llm_client=llm_client, now=now, case_ids=case_ids)
 
-    cases = (
-        db.execute(select(Case).where(Case.type.in_(RUNNER_SCOPE_TYPES), Case.status.notin_(TERMINAL_STATUSES)))
-        .scalars()
-        .all()
-    )
+    stmt = select(Case).where(Case.type.in_(RUNNER_SCOPE_TYPES), Case.status.notin_(TERMINAL_STATUSES))
+    if case_ids is not None:
+        stmt = stmt.where(Case.id.in_(case_ids))
+    cases = db.execute(stmt).scalars().all()
     for case in cases:
         _run_case_to_terminal(db, case, llm_client=llm_client, start_now=now)
 
