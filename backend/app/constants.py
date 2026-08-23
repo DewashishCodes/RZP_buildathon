@@ -62,3 +62,7 @@ AUDIT_EVENT_TYPES = [
 ]
 
 AUDIT_ACTORS = ["system", "llm", "human"]
+
+TICKET_STATUSES = ["open", "in_progress", "resolved"]
+
+TICKET_PRIORITIES = ["low", "normal", "high", "urgent"]

@@ -16,6 +16,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
+class Merchant(Base):
+    """A tenant. No auth in this build (deliberately, to keep judge/demo
+    access frictionless) - tenancy is enforced by scoping every query to a
+    merchant_id, not by a login wall.
+    """
+
+    __tablename__ = "merchants"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))
+    slug: Mapped[str] = mapped_column(String(50), unique=True)
+
+    cases: Mapped[list["Case"]] = relationship(back_populates="merchant")
+
+
 class Customer(Base):
     __tablename__ = "customers"
 
@@ -49,7 +64,15 @@ class Case(Base):
     # to just its own cases instead of the whole cumulative dev DB.
     # Nullable because cases seeded before Phase 7 have no batch_id.
     batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Tenant scoping. Nullable for the same reason batch_id is - cases
+    # seeded before multi-tenancy landed have no merchant.
+    merchant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("merchants.id"), nullable=True, index=True)
+    # When set, this case is waiting for a deferred follow-up round rather
+    # than having been driven to a terminal state in one pass - see
+    # app/execution/runner.py's non-instant mode and POST /jobs/run-due.
+    next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
+    merchant: Mapped["Merchant | None"] = relationship(back_populates="cases")
     customer: Mapped["Customer"] = relationship(back_populates="cases")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="case", order_by="Attempt.timestamp")
     audit_events: Mapped[list["AuditEvent"]] = relationship(back_populates="case", order_by="AuditEvent.timestamp")
@@ -89,3 +112,26 @@ class AuditEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB)
 
     case: Mapped["Case"] = relationship(back_populates="audit_events")
+
+
+class Ticket(Base):
+    """In-house mock of a support/collections tool. Auto-created whenever
+    a case is escalated to a human (app/execution/runner.py), so
+    escalate_human has somewhere real to land instead of being a dead-end
+    status - this is the "fake support tool" for the demo, not an
+    integration with a real external ticketing product.
+    """
+
+    __tablename__ = "tickets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"), unique=True)
+    merchant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("merchants.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
+    subject: Mapped[str] = mapped_column(String(200))
+    priority: Mapped[str] = mapped_column(String(10), default="normal")  # low | normal | high | urgent
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | in_progress | resolved
+    assignee: Mapped[str] = mapped_column(String(50), default="Unassigned")
+    reason: Mapped[str] = mapped_column(String(500))
+
+    case: Mapped["Case"] = relationship()
