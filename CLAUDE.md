@@ -192,15 +192,25 @@ cd backend
 .venv/Scripts/python.exe -m uvicorn app.api.main:app --reload
 ```
 
-- `POST /batches/run` `{"n_cases": 200, "seed": null}` — generates + persists
-  a fresh batch tagged with a new `batch_id`, runs it through the full
-  pipeline, returns `{batch_id, n_customers, n_cases, summary}`.
+- `POST /batches/run` `{"merchant_id": "...", "n_cases": 200, "seed": null, "instant": true}` —
+  generates + persists a fresh batch tagged with a new `batch_id` and the
+  given tenant, runs it through the full pipeline, returns
+  `{batch_id, n_customers, n_cases, summary}`. `merchant_id` is required —
+  see `GET /merchants` below. `instant=false` leaves non-terminal cases
+  scheduled instead of resolving them fully (see the scheduling section
+  above).
 - `GET /batches/{batch_id}/summary` — the PRD §11 dashboard rollup: ₹ at
   risk/recovered, recovery rate overall + by root cause, status counts,
   `stopping_rule_triggers`, `compliance_substitutions`.
-- `GET /cases?batch_id=&status=&type=` — filtered case list.
+- `GET /cases?batch_id=&merchant_id=&status=&type=` — filtered case list.
+- `GET /cases/scheduled?merchant_id=` — cases currently waiting on a
+  deferred round (`next_action_at` set).
 - `GET /cases/{case_id}` — full chronological timeline (all AuditEvents +
   Attempts) for one case.
+- `GET /merchants` — the demo tenants.
+- `GET /tickets?merchant_id=&status=`, `GET /tickets/{id}`.
+- `POST /jobs/run-due?merchant_id=` — advances every scheduled case for
+  that tenant (or all tenants if omitted).
 
 `app/audit/rollup.py` and `app/audit/timeline.py` hold the underlying
 queries, both scoped by `batch_id` so they never sweep the whole
@@ -210,7 +220,8 @@ simply won't appear in any batch-scoped query.
 
 Example walkthrough:
 ```
-curl -s -X POST http://localhost:8000/batches/run -H "Content-Type: application/json" -d '{"n_cases": 10, "seed": 500}'
+MERCHANT_ID=$(curl -s http://localhost:8000/merchants | python -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
+curl -s -X POST http://localhost:8000/batches/run -H "Content-Type: application/json" -d "{\"merchant_id\": \"$MERCHANT_ID\", \"n_cases\": 10, \"seed\": 500}"
 curl -s "http://localhost:8000/batches/<batch_id>/summary"
 curl -s "http://localhost:8000/cases?batch_id=<batch_id>&status=recovered"
 curl -s "http://localhost:8000/cases/<case_id>"
@@ -243,16 +254,77 @@ CORS enabled for `http://localhost:3000` (already configured in
 `app/api/main.py`, dev-only).
 
 - `/` — landing page.
-- `/run` — trigger a new batch (`POST /batches/run`), shows the result
-  inline with a link to the dashboard.
+- `/run` — trigger a new batch for the active merchant (`POST /batches/run`),
+  with a "Realistic scheduling mode" toggle; shows the result inline with
+  a link to the dashboard.
 - `/dashboard?batch=<id>` — batch rollup: ₹ at risk/recovered, recovery
   rate, stopping-rule/compliance-substitution counters, recovery-by-root-
-  cause table, case list.
+  cause table, Scheduled Actions panel (merchant-wide), case list.
 - `/cases/[id]` — full chronological audit timeline (every AuditEvent's
   payload rendered) + attempts, with a collapsible call transcript for
   `voice_call` attempts. Server-rendered.
+- `/tickets` — support tickets for the active merchant.
 
-`lib/api.ts` is the typed client for all four backend routes.
+The nav's merchant dropdown (top right) scopes everything to one tenant.
+`lib/api.ts` is the typed client for every backend route.
+
+## Post-Phase-8 additions: multi-tenancy, support tickets, real scheduling
+
+Added after Phase 8 in response to "how would a business actually integrate
+this" — three things needed to make the demo answer that question instead
+of only showing single-tenant instant-resolve batches.
+
+### Multi-tenancy (no auth)
+
+`Merchant` model + `Case.merchant_id`. Three demo tenants (Kirana Mart,
+CloudStack SaaS, Urban Wheels) auto-seeded on backend startup
+(`app/simulation/merchants.py`, idempotent by slug) via a FastAPI lifespan
+hook — no manual step, no signup flow. **Deliberately no auth** — tenancy
+is enforced by scoping every query to a `merchant_id`, not a login wall,
+to keep judge/demo access frictionless. The frontend nav has a merchant
+dropdown (`components/merchant-context.tsx`, persisted to localStorage)
+that scopes `/run`, `/tickets`, and the dashboard's Scheduled Actions
+panel. `POST /batches/run` now requires `merchant_id`.
+
+### Support tickets (in-house mock, not a real external tool)
+
+`Ticket` model, auto-created by `app/execution/tickets.py:create_ticket_for_case`
+every time a case hits `escalate_human` (idempotent per case). Priority
+derived from the guardrail rule: fraud/dispute → urgent, exhausted-channels
+→ high, everything else → normal. `GET /tickets`, `GET /tickets/{id}`,
+frontend `/tickets` page. This is a from-scratch mock, not an integration
+with Freshdesk/Zendesk/etc. — the point was to give `escalate_human`
+somewhere real to land for the demo, not to build a real support-tool
+integration.
+
+### Real scheduling (not just simulated time-jumps)
+
+`run_batch(..., instant=True)` (default) is unchanged — each case's
+`sim_now` clock still jumps forward per round so the dashboard populates
+immediately. `instant=False` runs **exactly one round per case**, then —
+if not terminal — persists `Case.next_action_at` (a real timestamp) and
+stops; the case sits with `status="recovering"` until something advances
+it. `process_due_cases()` (`POST /jobs/run-due`) advances every case
+currently scheduled, mirroring what a real cron/job queue would do —
+invoked manually here (not a background scheduler) so a live demo doesn't
+have to wait for real wall-clock time to pass. Frontend: `/run`'s
+"Realistic scheduling mode" checkbox, and the dashboard's
+**Scheduled Actions** panel (`components/scheduled-actions.tsx`) with a
+"Process due jobs now" button.
+
+**Bug found and fixed while building this**: a case left `recovering` by
+a non-instant round isn't a terminal status, so it can get swept up again
+by a *later, unrelated* instant-mode `run_batch` call (any call without a
+`case_ids` filter processes every non-terminal case in scope, regardless
+of which mode created it). The terminal branches only cleared
+`next_action_at` in the deferred-mode wrapper, not centrally, so a case
+could reach `escalated_human`/`recovered`/`written_off` while still
+carrying a stale future `next_action_at` — `GET /cases/scheduled` would
+then list already-finished cases as if still pending. Fixed by clearing
+`next_action_at` in `_run_case_round`'s three terminal branches directly.
+Caught by curling the real walkthrough, not by the test suite (existing
+tests didn't exercise "non-instant round, then later an unrelated instant
+run" on the same case) — a regression test now covers this exact sequence.
 
 ### Frontend design system
 
@@ -307,7 +379,7 @@ npm run dev
 |---|---|
 | `DATABASE_URL` | Postgres connection string (default matches docker-compose.yml) |
 | `GEMINI_API_KEY` | Gemini API key for detection/policy/voice LLM calls |
-| `GEMINI_MODEL` | Gemini model id (default `gemini-2.0-flash`) |
+| `GEMINI_MODEL` | Gemini model id (default `gemini-3.5-flash-lite` — see the rate-limit notes above) |
 | `ENABLE_LIVE_LLM_TESTS` | `true` to run real-Gemini smoke tests |
 
 ## Phase status
