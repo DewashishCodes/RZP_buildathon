@@ -49,6 +49,20 @@ docker compose up -d
 curl http://localhost:8000/health
 ```
 
+### Seed a synthetic batch and inspect it
+
+```
+cd backend
+.venv/Scripts/python.exe -m app.simulation.seed --n 200 --seed 42
+.venv/Scripts/python.exe scripts/inspect_batch.py
+```
+
+`app/simulation/generator.py` produces Customer + Case rows (root_cause
+left null — filled by detection in Phase 2). `app/simulation/recoverability.py`
+holds the **hidden** recoverability model: detection/policy code must never
+import it, only the Phase 4 execution layer rolls against it to produce
+outcomes.
+
 ### Tests
 
 ```
@@ -59,6 +73,12 @@ cd backend
 LLM-dependent tests are mocked by default. Real-Gemini smoke tests are gated
 behind `ENABLE_LIVE_LLM_TESTS=true` in `.env` so a normal test run never
 silently burns API cost.
+
+Note: `test_seed.py` writes real rows into the local dev Postgres (no
+separate test DB yet) — expect row counts in `inspect_batch.py` to include
+rows left over from test runs. Fine for buildathon scope; if it gets
+annoying, `docker compose down -v && docker compose up -d && alembic
+upgrade head` resets the DB.
 
 ### Frontend
 
@@ -81,8 +101,8 @@ npm run dev
 
 | Phase | Description | Status |
 |---|---|---|
-| 0 | Scaffolding & environment | In progress |
-| 1 | Data models + synthetic environment generator + seed script | Not started |
+| 0 | Scaffolding & environment | Done |
+| 1 | Data models + synthetic environment generator + seed script | Done |
 | 2 | Detection layer | Not started |
 | 3 | Policy engine (proposal + guardrails) | Not started |
 | 4 | Execution layer + batch runner | Not started |
