@@ -112,7 +112,11 @@ def _gen_payment_or_mandate_case(rng: random.Random, case_type: str, customer_id
         "root_cause": None,
         "outcome": "pending",
         "recovered_amount": 0,
+        "disputed": False,  # only meaningful for receivables; explicit here so bulk_insert_mappings never relies on the column default
     }
+
+
+DISPUTE_RATE = 0.08
 
 
 def _gen_receivable_case(rng: random.Random, customer_id: uuid.UUID, now: datetime) -> dict:
@@ -130,13 +134,19 @@ def _gen_receivable_case(rng: random.Random, customer_id: uuid.UUID, now: dateti
         "customer_id": customer_id,
         "amount": amount,
         "currency": "INR",
-        "created_at": due_at,
+        # The recovery case is opened around now (when it entered the
+        # system), independent of due_at - an invoice can be genuinely
+        # 60 days overdue on the day the case is first opened. Conflating
+        # the two here would make the 14-day case-age escalation guardrail
+        # fire immediately for any mid/late-bucket receivable.
+        "created_at": now - timedelta(hours=rng.randint(0, 48)),
         "due_at": due_at,
         "status": "open",
         "raw_failure_reason": None,
         "root_cause": None,
         "outcome": "pending",
         "recovered_amount": 0,
+        "disputed": rng.random() < DISPUTE_RATE,
     }
 
 
