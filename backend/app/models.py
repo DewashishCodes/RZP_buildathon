@@ -9,7 +9,7 @@ action to the bounded action space.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,7 @@ class Case(Base):
     root_cause: Mapped[str | None] = mapped_column(String(50), nullable=True)
     outcome: Mapped[str] = mapped_column(String(20), default="pending")
     recovered_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    disputed: Mapped[bool] = mapped_column(default=False)
 
     customer: Mapped["Customer"] = relationship(back_populates="cases")
     attempts: Mapped[list["Attempt"]] = relationship(back_populates="case", order_by="Attempt.timestamp")
@@ -71,7 +72,13 @@ class AuditEvent(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"))
     attempt_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("attempts.id"), nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    # Server-side clock_timestamp() (not Python-side datetime.utcnow()):
+    # several AuditEvents are routinely created within the same flush
+    # (e.g. action_proposed + compliance_check back to back), and
+    # datetime.utcnow()'s resolution on this system was observed producing
+    # byte-identical timestamps for them, which breaks chronological
+    # ordering. clock_timestamp() is evaluated per row by Postgres itself.
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
     event_type: Mapped[str] = mapped_column(String(30))
     actor: Mapped[str] = mapped_column(String(10))
     payload: Mapped[dict] = mapped_column(JSONB)
