@@ -254,6 +254,28 @@ CORS enabled for `http://localhost:3000` (already configured in
 
 `lib/api.ts` is the typed client for all four backend routes.
 
+### Frontend design system
+
+Dark-only theme built on the `dataviz` skill's validated reference
+palette (not arbitrary Tailwind neutrals) — status colors and the chart
+accent hue are contrast/CVD-checked against this app's exact dark
+surface. Inspiration: Linear's chrome/typography, Ramp's product
+surfaces (tables, badges, filter chips), Mercury's stat tiles/CTAs,
+Sentry's event-timeline pattern for the case drill-down.
+
+- `app/globals.css` — design tokens as Tailwind v4 `@theme` vars
+  (`bg-surface-1`, `text-status-good`, etc.)
+- `components/status-badge.tsx` — icon + label + status color, per the
+  dataviz rule that a status color never carries meaning alone
+- `components/stat-tile.tsx` — hero-number cards for the dashboard KPI row
+- `components/progress-row.tsx` — the "meter" pattern for recovery-by-
+  root-cause (one accent hue = recovered share; row label already
+  carries identity via text, so this isn't a categorical-color problem)
+- `components/event-timeline.tsx` — the Sentry-style vertical timeline
+  for `/cases/[id]`
+- `components/nav.tsx`, `components/icons.tsx` — nav chrome, small
+  hand-built icon set (no icon library dependency)
+
 ### Tests
 
 ```
