@@ -185,6 +185,48 @@ two real bugs it surfaced:
   `compliance_check`), breaking chronological ordering. Fixed: switched
   to Postgres server-side `clock_timestamp()`, evaluated per row.
 
+### API routes (dashboard backend)
+
+```
+cd backend
+.venv/Scripts/python.exe -m uvicorn app.api.main:app --reload
+```
+
+- `POST /batches/run` `{"n_cases": 200, "seed": null}` — generates + persists
+  a fresh batch tagged with a new `batch_id`, runs it through the full
+  pipeline, returns `{batch_id, n_customers, n_cases, summary}`.
+- `GET /batches/{batch_id}/summary` — the PRD §11 dashboard rollup: ₹ at
+  risk/recovered, recovery rate overall + by root cause, status counts,
+  `stopping_rule_triggers`, `compliance_substitutions`.
+- `GET /cases?batch_id=&status=&type=` — filtered case list.
+- `GET /cases/{case_id}` — full chronological timeline (all AuditEvents +
+  Attempts) for one case.
+
+`app/audit/rollup.py` and `app/audit/timeline.py` hold the underlying
+queries, both scoped by `batch_id` so they never sweep the whole
+cumulative dev DB — a nice side effect of adding `batch_id` in this
+phase. Every case seeded before this phase has `batch_id = NULL` and
+simply won't appear in any batch-scoped query.
+
+Example walkthrough:
+```
+curl -s -X POST http://localhost:8000/batches/run -H "Content-Type: application/json" -d '{"n_cases": 10, "seed": 500}'
+curl -s "http://localhost:8000/batches/<batch_id>/summary"
+curl -s "http://localhost:8000/cases?batch_id=<batch_id>&status=recovered"
+curl -s "http://localhost:8000/cases/<case_id>"
+```
+
+**Note on burst rate limits**: a live 10-case batch run surfaced that
+Gemini's free tier also enforces a requests-per-minute cap, not just the
+daily one - a burst of policy calls across many cases in a short window
+can trip it mid-batch. The existing fail-safe (catches `APIError`, falls
+back to `escalate_human`) handled it gracefully with zero crash, and the
+new `/cases/{id}` drill-down is exactly how you'd notice/diagnose it in
+practice (look for `"LLM proposal was unparseable or invalid; failing
+safe to human escalation."` in an `action_proposed` payload). Not fixed
+here - noted as a real risk for Phase 9 polish if larger batches are
+needed for the final demo (PRD §16 already flagged this as an open risk).
+
 ### Tests
 
 ```
@@ -230,7 +272,7 @@ npm run dev
 | 4 | Execution layer + batch runner | Done |
 | 5 | Voice recovery channel | Done |
 | 6 | B2B receivables flow | Done |
-| 7 | Audit trail storage + dashboard API | Not started |
+| 7 | Audit trail storage + dashboard API | Done |
 | 8 | Frontend (dashboard, run, case drill-down) | Not started |
 | 9 | Seed-guarantee, polish, demo rehearsal | Not started |
 
