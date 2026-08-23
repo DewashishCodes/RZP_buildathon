@@ -9,11 +9,20 @@ app/detection/receivables.py rather than the LLM classifier, but from
 here on everything (allowed action subset, guardrails, connectors) is
 already generic across case types.
 
-Time is simulated, not real: each case gets its own `sim_now` clock that
-jumps forward ~25h (or to a retry_scheduled's retry_date, if later) after
-every round, so a whole multi-week recovery journey - and the guardrails
-that depend on elapsed time (retry spacing, case age) - plays out within a
-single script run instead of actually waiting.
+Two run modes:
+  - instant=True (default): each case's `sim_now` clock jumps forward
+    ~25h per round so a whole multi-week recovery journey plays out
+    within one call, and the dashboard shows final results immediately.
+  - instant=False: processes exactly one round per case, then - if the
+    case didn't reach a terminal state - persists Case.next_action_at
+    and stops. A separate call to process_due_cases() (POST
+    /jobs/run-due) advances those cases. This is the "real scheduling"
+    path: a case genuinely sits waiting rather than being fast-forwarded,
+    which is the thing to point at when a demo needs to prove the batch
+    dashboard isn't secretly cheating on time.
+
+Escalating a case to a human also opens a support ticket
+(app/execution/tickets.py) - escalate_human has somewhere real to land.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -23,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.detection.service import run_detection_on_batch
 from app.execution.connectors import execute_contact_action, execute_voice_call
+from app.execution.tickets import create_ticket_for_case
 from app.models import Attempt, AuditEvent, Case
 from app.policy.channels import determine_channel
 from app.policy.engine import decide_action
@@ -33,7 +43,13 @@ MAX_ROUNDS_PER_CASE = 6
 ROUND_ADVANCE = timedelta(hours=25)
 
 
-def run_batch(db: Session, llm_client=None, now: datetime | None = None, case_ids: list | None = None) -> dict:
+def run_batch(
+    db: Session,
+    llm_client=None,
+    now: datetime | None = None,
+    case_ids: list | None = None,
+    instant: bool = True,
+) -> dict:
     """Runs the full pipeline. If case_ids is given, scopes detection and
     execution to exactly those cases (used by scenario-specific demo
     scripts so they don't sweep every accumulated case in the dev DB);
@@ -48,10 +64,61 @@ def run_batch(db: Session, llm_client=None, now: datetime | None = None, case_id
         stmt = stmt.where(Case.id.in_(case_ids))
     cases = db.execute(stmt).scalars().all()
     for case in cases:
-        _run_case_to_terminal(db, case, llm_client=llm_client, start_now=now)
+        if instant:
+            _run_case_to_terminal(db, case, llm_client=llm_client, start_now=now)
+        else:
+            _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now)
 
     db.commit()
     return summarize(db)
+
+
+def process_due_cases(db: Session, llm_client=None, now: datetime | None = None, merchant_id=None) -> dict:
+    """Advances every case currently waiting on a deferred round
+    (Case.next_action_at is set). Mirrors what a real cron/job queue
+    would do on schedule; here it's invoked manually (POST /jobs/run-due)
+    so a demo doesn't have to wait for real wall-clock time to pass.
+    """
+    now = now or datetime.now(timezone.utc)
+
+    stmt = select(Case).where(Case.next_action_at.is_not(None), Case.status.notin_(TERMINAL_STATUSES))
+    if merchant_id is not None:
+        stmt = stmt.where(Case.merchant_id == merchant_id)
+    cases = db.execute(stmt).scalars().all()
+
+    reached_terminal = 0
+    rescheduled = 0
+    for case in cases:
+        was_terminal = _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now)
+        if was_terminal:
+            reached_terminal += 1
+        else:
+            rescheduled += 1
+
+    db.commit()
+    return {"processed": len(cases), "reached_terminal": reached_terminal, "rescheduled": rescheduled}
+
+
+def _run_case_one_deferred_round(db: Session, case: Case, llm_client, now: datetime) -> bool:
+    """Runs exactly one round. Returns True if the case reached a
+    terminal state, False if it was rescheduled (next_action_at set)."""
+    db.refresh(case)
+    if case.status in TERMINAL_STATUSES:
+        case.next_action_at = None
+        db.add(case)
+        db.commit()
+        return True
+
+    result = _run_case_round(db, case, llm_client=llm_client, sim_now=now)
+
+    if result["terminal"]:
+        case.next_action_at = None
+        db.add(case)
+    else:
+        case.next_action_at = result["next_sim_now"]
+        db.add(case)
+    db.commit()
+    return result["terminal"]
 
 
 def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: datetime) -> None:
@@ -62,114 +129,16 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
         if case.status in TERMINAL_STATUSES:
             return
 
-        customer = case.customer
-        attempts = list(case.attempts)
-
-        decision = decide_action(db, case, customer, attempts, now=sim_now, llm_client=llm_client)
-        action, params = decision["action"], decision["params"]
-
-        if action == "no_action":
+        result = _run_case_round(db, case, llm_client=llm_client, sim_now=sim_now)
+        if result["terminal"]:
             return
-
-        if action == "stop_case":
-            case.status = "written_off"
-            case.outcome = "unrecovered"
-            db.add(case)
-            if decision["source"] != "stopping_rule":
-                db.add(
-                    AuditEvent(
-                        id=uuid.uuid4(),
-                        case_id=case.id,
-                        event_type="stopped",
-                        actor="llm",
-                        payload={"action": action, "rule": decision.get("rule"), "reason": decision.get("reason")},
-                    )
-                )
-            db.commit()
-            return
-
-        if action == "escalate_human":
-            case.status = "escalated_human"
-            db.add(case)
-            if decision["source"] != "stopping_rule":
-                db.add(
-                    AuditEvent(
-                        id=uuid.uuid4(),
-                        case_id=case.id,
-                        event_type="escalated",
-                        actor="llm",
-                        payload={"action": action, "rule": decision.get("rule"), "reason": decision.get("reason")},
-                    )
-                )
-            db.commit()
-            return
-
-        channel = determine_channel(action, customer.preferred_channel)
-        if action == "voice_call":
-            outcome = execute_voice_call(case, customer, now=sim_now, llm_client=llm_client)
-        else:
-            outcome = execute_contact_action(case, customer, action, now=sim_now)
-
-        attempt = Attempt(
-            id=uuid.uuid4(),
-            case_id=case.id,
-            timestamp=sim_now,
-            channel=channel,
-            action=action,
-            compliance_check={"passed": not decision["substituted"], "rule": decision.get("rule"), "reason": decision.get("reason")},
-            outcome=outcome["attempt_outcome"],
-            promise_to_pay_date=outcome["promise_to_pay_date"],
-            transcript=outcome.get("transcript"),
-        )
-        db.add(attempt)
-        db.add(
-            AuditEvent(
-                id=uuid.uuid4(),
-                case_id=case.id,
-                attempt_id=attempt.id,
-                event_type="action_executed",
-                actor="system",
-                payload={"action": action, "channel": channel},
-            )
-        )
-        db.add(
-            AuditEvent(
-                id=uuid.uuid4(),
-                case_id=case.id,
-                attempt_id=attempt.id,
-                event_type="outcome_recorded",
-                actor="system",
-                payload={
-                    "outcome": outcome["attempt_outcome"],
-                    "recovered": outcome["recovered"],
-                    "recovered_amount": outcome["recovered_amount"],
-                },
-            )
-        )
-
-        if outcome["recovered"]:
-            case.status = "recovered"
-            case.outcome = "recovered"
-            case.recovered_amount = outcome["recovered_amount"]
-            db.add(case)
-            db.commit()
-            return
-
-        case.status = "recovering"
-        db.add(case)
-        db.commit()
-
-        sim_now = sim_now + ROUND_ADVANCE
-        retry_date = params.get("retry_date")
-        if action == "retry_scheduled" and retry_date is not None:
-            if retry_date.tzinfo is None:
-                retry_date = retry_date.replace(tzinfo=timezone.utc)
-            sim_now = max(sim_now, retry_date + timedelta(hours=1))
+        sim_now = result["next_sim_now"]
 
     # Safety cap: guardrails should always terminate a case well before
     # this many rounds. If they somehow didn't, force resolution rather
     # than leaving the case in limbo (PRD §9.2's no-limbo requirement).
     case.status = "escalated_human"
+    case.next_action_at = None
     db.add(case)
     db.add(
         AuditEvent(
@@ -180,7 +149,123 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
             payload={"rule": "max_rounds_safety_cap", "reason": f"case did not reach a terminal state within {MAX_ROUNDS_PER_CASE} rounds"},
         )
     )
+    create_ticket_for_case(db, case, rule="max_rounds_safety_cap", reason="Did not reach a terminal state within the round cap.")
     db.commit()
+
+
+def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> dict:
+    """Runs exactly one decide -> execute round for a case already known
+    to be non-terminal. Returns {"terminal": bool, "next_sim_now": datetime}
+    (next_sim_now is only meaningful when terminal is False).
+    """
+    customer = case.customer
+    attempts = list(case.attempts)
+
+    decision = decide_action(db, case, customer, attempts, now=sim_now, llm_client=llm_client)
+    action, params = decision["action"], decision["params"]
+
+    if action == "no_action":
+        # Not terminal, but nothing happened this round either - treat as
+        # "check back later" with the standard round advance.
+        return {"terminal": False, "next_sim_now": sim_now + ROUND_ADVANCE}
+
+    if action == "stop_case":
+        case.status = "written_off"
+        case.outcome = "unrecovered"
+        db.add(case)
+        if decision["source"] != "stopping_rule":
+            db.add(
+                AuditEvent(
+                    id=uuid.uuid4(),
+                    case_id=case.id,
+                    event_type="stopped",
+                    actor="llm",
+                    payload={"action": action, "rule": decision.get("rule"), "reason": decision.get("reason")},
+                )
+            )
+        db.commit()
+        return {"terminal": True, "next_sim_now": None}
+
+    if action == "escalate_human":
+        case.status = "escalated_human"
+        db.add(case)
+        if decision["source"] != "stopping_rule":
+            db.add(
+                AuditEvent(
+                    id=uuid.uuid4(),
+                    case_id=case.id,
+                    event_type="escalated",
+                    actor="llm",
+                    payload={"action": action, "rule": decision.get("rule"), "reason": decision.get("reason")},
+                )
+            )
+        create_ticket_for_case(db, case, rule=decision.get("rule"), reason=decision.get("reason"))
+        db.commit()
+        return {"terminal": True, "next_sim_now": None}
+
+    channel = determine_channel(action, customer.preferred_channel)
+    if action == "voice_call":
+        outcome = execute_voice_call(case, customer, now=sim_now, llm_client=llm_client)
+    else:
+        outcome = execute_contact_action(case, customer, action, now=sim_now)
+
+    attempt = Attempt(
+        id=uuid.uuid4(),
+        case_id=case.id,
+        timestamp=sim_now,
+        channel=channel,
+        action=action,
+        compliance_check={"passed": not decision["substituted"], "rule": decision.get("rule"), "reason": decision.get("reason")},
+        outcome=outcome["attempt_outcome"],
+        promise_to_pay_date=outcome["promise_to_pay_date"],
+        transcript=outcome.get("transcript"),
+    )
+    db.add(attempt)
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            case_id=case.id,
+            attempt_id=attempt.id,
+            event_type="action_executed",
+            actor="system",
+            payload={"action": action, "channel": channel},
+        )
+    )
+    db.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            case_id=case.id,
+            attempt_id=attempt.id,
+            event_type="outcome_recorded",
+            actor="system",
+            payload={
+                "outcome": outcome["attempt_outcome"],
+                "recovered": outcome["recovered"],
+                "recovered_amount": outcome["recovered_amount"],
+            },
+        )
+    )
+
+    if outcome["recovered"]:
+        case.status = "recovered"
+        case.outcome = "recovered"
+        case.recovered_amount = outcome["recovered_amount"]
+        db.add(case)
+        db.commit()
+        return {"terminal": True, "next_sim_now": None}
+
+    case.status = "recovering"
+    db.add(case)
+    db.commit()
+
+    next_sim_now = sim_now + ROUND_ADVANCE
+    retry_date = params.get("retry_date")
+    if action == "retry_scheduled" and retry_date is not None:
+        if retry_date.tzinfo is None:
+            retry_date = retry_date.replace(tzinfo=timezone.utc)
+        next_sim_now = max(next_sim_now, retry_date + timedelta(hours=1))
+
+    return {"terminal": False, "next_sim_now": next_sim_now}
 
 
 def summarize(db: Session) -> dict:
