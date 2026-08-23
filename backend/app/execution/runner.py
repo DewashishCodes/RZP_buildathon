@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.detection.service import run_detection_on_batch
-from app.execution.connectors import execute_contact_action
+from app.execution.connectors import execute_contact_action, execute_voice_call
 from app.models import Attempt, AuditEvent, Case
 from app.policy.channels import determine_channel
 from app.policy.engine import decide_action
@@ -101,7 +101,10 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
             return
 
         channel = determine_channel(action, customer.preferred_channel)
-        outcome = execute_contact_action(case, customer, action, now=sim_now)
+        if action == "voice_call":
+            outcome = execute_voice_call(case, customer, now=sim_now, llm_client=llm_client)
+        else:
+            outcome = execute_contact_action(case, customer, action, now=sim_now)
 
         attempt = Attempt(
             id=uuid.uuid4(),
@@ -112,6 +115,7 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
             compliance_check={"passed": not decision["substituted"], "rule": decision.get("rule"), "reason": decision.get("reason")},
             outcome=outcome["attempt_outcome"],
             promise_to_pay_date=outcome["promise_to_pay_date"],
+            transcript=outcome.get("transcript"),
         )
         db.add(attempt)
         db.add(
