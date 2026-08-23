@@ -82,6 +82,26 @@ of this build — the API redirects to `gemini-3.6-flash`, which is now the
 default in `app/config.py`. If Gemini deprecates models again, update
 `GEMINI_MODEL` in `.env`/`app/config.py`.
 
+### Run the policy engine guardrail demo
+
+```
+cd backend
+.venv/Scripts/python.exe scripts/run_policy_demo.py
+```
+
+Four hand-built scenarios proving the guardrail layer (`app/policy/guardrails.py`)
+actually overrides the LLM, not just exists: fraud auto-escalate, a
+DND-blocks-voice_call substitution (forced deterministically, not left to
+chance — see the script's `_FixedResponseClient`), a max-contacts
+auto-escalate, and one normal real-Gemini proposal that passes compliance
+cleanly. `app/policy/engine.py:decide_action` is the entry point the
+Phase 4 execution layer will call per case.
+
+Stopping rules (`check_stopping_rules`) are absolute and skip the LLM
+call entirely when they fire. Compliance rules (`check_compliance`) are
+substitutive — they swap in `send_reminder` as the universal compliant
+fallback rather than blocking the case outright.
+
 ### Tests
 
 ```
@@ -123,7 +143,7 @@ npm run dev
 | 0 | Scaffolding & environment | Done |
 | 1 | Data models + synthetic environment generator + seed script | Done |
 | 2 | Detection layer | Done |
-| 3 | Policy engine (proposal + guardrails) | Not started |
+| 3 | Policy engine (proposal + guardrails) | Done |
 | 4 | Execution layer + batch runner | Not started |
 | 5 | Voice recovery channel | Not started |
 | 6 | B2B receivables flow | Not started |
