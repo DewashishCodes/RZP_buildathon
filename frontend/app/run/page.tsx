@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { runBatch, type RunBatchResponse } from "@/lib/api";
+import { useMerchant } from "@/components/merchant-context";
 import { ArrowRightIcon } from "@/components/icons";
 
 function formatRs(n: number) {
@@ -11,20 +12,23 @@ function formatRs(n: number) {
 
 export default function RunBatchPage() {
   const router = useRouter();
+  const { merchantId, merchants, loading: merchantLoading } = useMerchant();
   const [nCases, setNCases] = useState(50);
   const [seed, setSeed] = useState<string>("");
+  const [instant, setInstant] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RunBatchResponse | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!merchantId) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const parsedSeed = seed.trim() === "" ? null : Number(seed);
-      const response = await runBatch(nCases, parsedSeed);
+      const response = await runBatch({ merchantId, nCases, seed: parsedSeed, instant });
       setResult(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run batch");
@@ -33,13 +37,15 @@ export default function RunBatchPage() {
     }
   }
 
+  const activeMerchant = merchants.find((m) => m.id === merchantId);
+
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-8 px-6 py-16">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-text-primary">Run a batch</h1>
         <p className="mt-1.5 text-sm text-text-secondary">
           Generates a synthetic batch of cases and runs the full detection → policy → execution
-          pipeline against it, live.
+          pipeline against it, live, for <span className="text-text-primary">{activeMerchant?.name ?? "…"}</span>.
         </p>
       </div>
 
@@ -66,9 +72,28 @@ export default function RunBatchPage() {
             className="rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-text-primary outline-none focus:border-accent"
           />
         </label>
+
+        <div className="flex items-start gap-3 rounded-lg border border-border-strong bg-surface-2 px-3.5 py-3">
+          <input
+            id="instant"
+            type="checkbox"
+            checked={!instant}
+            onChange={(e) => setInstant(!e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-accent"
+          />
+          <label htmlFor="instant" className="text-sm">
+            <span className="font-medium text-text-primary">Realistic scheduling mode</span>
+            <p className="mt-0.5 text-xs text-text-muted">
+              Each case runs exactly one round, then queues its next action for real instead of
+              resolving instantly — proves the batch isn&apos;t secretly fast-forwarding time. Check
+              the dashboard&apos;s Scheduled Actions panel afterward, or process due jobs manually.
+            </p>
+          </label>
+        </div>
+
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || merchantLoading || !merchantId}
           className="inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-strong disabled:opacity-50"
         >
           {loading ? "Running…" : "Run batch"}
