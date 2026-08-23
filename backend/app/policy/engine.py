@@ -48,6 +48,7 @@ def decide_action(
             "params": stopping_result["params"],
             "source": "stopping_rule",
             "rule": stopping_result["rule"],
+            "reason": stopping_result["reason"],
             "substituted": False,
         }
 
@@ -88,6 +89,7 @@ def decide_action(
         "params": verdict["params"],
         "source": "llm",
         "rule": verdict["rule"],
+        "reason": verdict["reason"],
         "substituted": verdict["substituted"],
     }
 
