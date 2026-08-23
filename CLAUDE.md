@@ -63,6 +63,25 @@ holds the **hidden** recoverability model: detection/policy code must never
 import it, only the Phase 4 execution layer rolls against it to produce
 outcomes.
 
+### Run detection over a seeded batch
+
+```
+cd backend
+.venv/Scripts/python.exe scripts/run_detection.py
+```
+
+Rules-first (`app/detection/rules.py`) for unambiguous decline codes,
+Gemini fallback (`app/detection/llm_classifier.py`) for free-text/ambiguous
+messages — only ~5% of payment/mandate cases hit the LLM path by design
+(kept low deliberately, mind Gemini free-tier rate limits when re-seeding
+large batches and re-running detection repeatedly). Receivables are
+skipped — their root-cause taxonomy is built in Phase 6.
+
+**Note on model name**: `gemini-2.0-flash` (the PRD-era default) 404s as
+of this build — the API redirects to `gemini-3.6-flash`, which is now the
+default in `app/config.py`. If Gemini deprecates models again, update
+`GEMINI_MODEL` in `.env`/`app/config.py`.
+
 ### Tests
 
 ```
@@ -103,7 +122,7 @@ npm run dev
 |---|---|---|
 | 0 | Scaffolding & environment | Done |
 | 1 | Data models + synthetic environment generator + seed script | Done |
-| 2 | Detection layer | Not started |
+| 2 | Detection layer | Done |
 | 3 | Policy engine (proposal + guardrails) | Not started |
 | 4 | Execution layer + batch runner | Not started |
 | 5 | Voice recovery channel | Not started |
