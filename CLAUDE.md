@@ -226,6 +226,33 @@ practice (look for `"LLM proposal was unparseable or invalid; failing
 safe to human escalation."` in an `action_proposed` payload). Not fixed
 here - noted as a real risk for Phase 9 polish if larger batches are
 needed for the final demo (PRD §16 already flagged this as an open risk).
+Observed in practice: a live 25-case run showed heavy escalation from
+this; a 10-case run at the same time came out at 80%+ recovery. Keep
+batch runs small (~10-15 cases) until this gets throttling/backoff.
+
+### Frontend (dashboard, run, case drill-down)
+
+```
+cd frontend
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL, defaults to localhost:8000
+npm run dev
+```
+
+Requires the backend running (`uvicorn app.api.main:app --reload`) with
+CORS enabled for `http://localhost:3000` (already configured in
+`app/api/main.py`, dev-only).
+
+- `/` — landing page.
+- `/run` — trigger a new batch (`POST /batches/run`), shows the result
+  inline with a link to the dashboard.
+- `/dashboard?batch=<id>` — batch rollup: ₹ at risk/recovered, recovery
+  rate, stopping-rule/compliance-substitution counters, recovery-by-root-
+  cause table, case list.
+- `/cases/[id]` — full chronological audit timeline (every AuditEvent's
+  payload rendered) + attempts, with a collapsible call transcript for
+  `voice_call` attempts. Server-rendered.
+
+`lib/api.ts` is the typed client for all four backend routes.
 
 ### Tests
 
@@ -273,7 +300,7 @@ npm run dev
 | 5 | Voice recovery channel | Done |
 | 6 | B2B receivables flow | Done |
 | 7 | Audit trail storage + dashboard API | Done |
-| 8 | Frontend (dashboard, run, case drill-down) | Not started |
+| 8 | Frontend (dashboard, run, case drill-down) | Done |
 | 9 | Seed-guarantee, polish, demo rehearsal | Not started |
 
 Full phase plan: `C:\Users\Dewashish Lambore\.claude\plans\go-through-the-prd-snuggly-cerf.md`
