@@ -1,26 +1,65 @@
 @import "tailwindcss";
 
+/* Design tokens - dark-only theme (Linear-esque chrome + typography,
+   Ramp-esque product elements, Mercury-esque stat tiles/CTAs, Sentry-esque
+   timeline). Palette values are the validated dark-mode steps from the
+   dataviz skill's reference palette (references/palette.md), not
+   arbitrary picks - chosen so status colors and the one chart hue clear
+   contrast/CVD checks on this exact surface. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --page-plane: #0d0d0d;
+  --surface-1: #17171a;
+  --surface-2: #1f1f23;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --gridline: #2c2c2a;
+
+  --accent: #3987e5; /* categorical slot 1 (blue) - primary CTA, "recovering" state, chart fill */
+  --accent-strong: #5c9eea;
+
+  --status-good: #0ca30c;
+  --status-good-bg: rgba(12, 163, 12, 0.12);
+  --status-warning: #fab219;
+  --status-warning-bg: rgba(250, 178, 25, 0.12);
+  --status-critical: #d03b3b;
+  --status-critical-bg: rgba(208, 59, 59, 0.12);
+  --status-neutral: #898781;
+  --status-neutral-bg: rgba(137, 135, 129, 0.12);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-plane: var(--page-plane);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-gridline: var(--gridline);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-status-good: var(--status-good);
+  --color-status-good-bg: var(--status-good-bg);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-critical: var(--status-critical);
+  --color-status-critical-bg: var(--status-critical-bg);
+  --color-status-neutral: var(--status-neutral);
+  --color-status-neutral-bg: var(--status-neutral-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--page-plane);
+  color: var(--text-primary);
+  font-feature-settings: "cv11", "ss01";
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
