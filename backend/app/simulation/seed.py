@@ -9,20 +9,29 @@ import uuid
 from app.db.session import SessionLocal
 from app.models import Case, Customer
 from app.simulation.generator import generate_batch
+from app.simulation.merchants import seed_merchants
 
 
-def seed_batch(n_cases: int = 200, seed: int | None = None) -> tuple[int, int, uuid.UUID]:
+def seed_batch(n_cases: int = 200, seed: int | None = None, merchant_id: uuid.UUID | None = None) -> tuple[int, int, uuid.UUID]:
     """Returns (n_customers, n_cases, batch_id). Every case gets tagged
     with the same fresh batch_id so it's drillable via the Phase 7
     rollup queries (app/audit/rollup.py) scoped to just this run.
+
+    merchant_id defaults to the first demo merchant (auto-seeded if
+    missing) so CLI usage keeps working without callers having to look
+    one up first - the API route requires it explicitly instead.
     """
     batch_id = uuid.uuid4()
     customers, cases = generate_batch(n_cases=n_cases, seed=seed)
-    for case in cases:
-        case["batch_id"] = batch_id
 
     db = SessionLocal()
     try:
+        if merchant_id is None:
+            merchant_id = seed_merchants(db)[0].id
+        for case in cases:
+            case["batch_id"] = batch_id
+            case["merchant_id"] = merchant_id
+
         db.bulk_insert_mappings(Customer, customers)
         db.bulk_insert_mappings(Case, cases)
         db.commit()
