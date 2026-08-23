@@ -1,0 +1,57 @@
+"""API-level tests for /batches routes. Monkeypatches the module-level
+Gemini client singleton (app.detection.gemini_client._client) rather than
+passing a client explicitly - the HTTP routes don't accept a client
+override (production always uses the real one), so this is the one place
+tests reach past the module boundary to keep real Gemini calls out of
+the test suite.
+"""
+from fastapi.testclient import TestClient
+
+import app.detection.gemini_client as gemini_client_module
+from app.api.main import app
+from tests.fakes import FakeGeminiClient
+
+client = TestClient(app)
+
+
+def _patch_gemini(monkeypatch, response_text='{"action": "retry_now", "params": {}, "rationale": "test"}'):
+    fake = FakeGeminiClient(response_text=response_text)
+    monkeypatch.setattr(gemini_client_module, "_client", fake)
+    return fake
+
+
+def test_run_batch_returns_batch_id_and_summary(monkeypatch):
+    _patch_gemini(monkeypatch)
+
+    resp = client.post("/batches/run", json={"n_cases": 5, "seed": 1})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "batch_id" in data
+    assert data["n_cases"] == 5
+    assert data["n_customers"] == 5
+    assert "summary" in data
+
+
+def test_get_batch_summary_after_run(monkeypatch):
+    _patch_gemini(monkeypatch)
+
+    run_resp = client.post("/batches/run", json={"n_cases": 5, "seed": 2})
+    batch_id = run_resp.json()["batch_id"]
+
+    summary_resp = client.get(f"/batches/{batch_id}/summary")
+
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert summary["batch_id"] == batch_id
+    assert summary["total_cases"] >= 1
+    assert "by_root_cause" in summary
+    assert "stopping_rule_triggers" in summary
+    assert "compliance_substitutions" in summary
+
+
+def test_get_batch_summary_404_for_unknown_batch():
+    import uuid
+
+    resp = client.get(f"/batches/{uuid.uuid4()}/summary")
+    assert resp.status_code == 404
