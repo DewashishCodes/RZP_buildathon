@@ -102,6 +102,40 @@ call entirely when they fire. Compliance rules (`check_compliance`) are
 substitutive — they swap in `send_reminder` as the universal compliant
 fallback rather than blocking the case outright.
 
+### Run a full batch end-to-end (detection -> policy -> execution)
+
+```
+cd backend
+.venv/Scripts/python.exe -m app.simulation.seed --n 20 --seed 200
+.venv/Scripts/python.exe scripts/run_batch.py
+```
+
+`app/execution/runner.py:run_batch` loops every open payment_failure/
+mandate_failure case through `decide_action` + a mock connector
+(`app/execution/connectors.py`) until it reaches a terminal status
+(`recovered`/`written_off`/`escalated_human`). Each case gets its own
+simulated clock (jumps ~25h per round) so multi-week recovery journeys
+play out in one script run. Receivables are excluded from the runner
+until Phase 6 gives them a root-cause taxonomy.
+
+**Gemini free-tier quota**: `gemini-3.6-flash`'s free tier caps out at
+20 requests/day — a single batch run blows through that immediately.
+Switched the default model to `gemini-3.5-flash-lite`, which has a much
+higher free-tier daily quota and works fine for our structured-JSON
+calls. Both `classify_by_llm` and `propose_action` now catch
+`google.genai.errors.APIError` and fail safe (same fallback as
+unparseable output) rather than crashing the batch — so a rate limit or
+network blip degrades gracefully instead of taking down a whole run. If
+you see an unusually high `escalated_human` count in a batch summary,
+check whether the quota was hit (fail-safe fallback is `escalate_human`)
+before assuming the policy engine is behaving badly.
+
+Note: the dev Postgres DB accumulates cases across every seed run in
+this project's history (see the Phase 1 note above on `test_seed.py`) —
+`run_batch`'s summary numbers are cumulative across everything ever
+seeded, not just your most recent batch. Reset with `docker compose down
+-v && docker compose up -d && alembic upgrade head` for a clean slate.
+
 ### Tests
 
 ```
@@ -144,7 +178,7 @@ npm run dev
 | 1 | Data models + synthetic environment generator + seed script | Done |
 | 2 | Detection layer | Done |
 | 3 | Policy engine (proposal + guardrails) | Done |
-| 4 | Execution layer + batch runner | Not started |
+| 4 | Execution layer + batch runner | Done |
 | 5 | Voice recovery channel | Not started |
 | 6 | B2B receivables flow | Not started |
 | 7 | Audit trail storage + dashboard API | Not started |
