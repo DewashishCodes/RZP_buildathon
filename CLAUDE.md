@@ -158,6 +158,33 @@ hidden recoverability model still decides whether money actually moves
 — consistent with every other channel, not a separate "the LLM decides
 the outcome" path.
 
+### Run the receivables-only demo
+
+```
+cd backend
+.venv/Scripts/python.exe scripts/run_receivables_demo.py
+```
+
+Three hand-built receivable scenarios (disputed, overdue_late,
+overdue_mid), scoped via `run_batch`'s `case_ids` filter so it doesn't
+sweep every accumulated case in the dev DB. `app/detection/receivables.py`
+classifies deterministically from `due_at`/`disputed` — no LLM needed,
+unlike payment/mandate root causes. Everything downstream (allowed
+action subset, guardrails, connectors) was already generic across case
+types from Phases 3-5; this phase was mostly proving that, plus fixing
+two real bugs it surfaced:
+
+- **`created_at` was conflated with `due_at`** for receivables (Phase 1
+  generator bug) — a 60-day-overdue invoice looked 60 days old the moment
+  it was created, immediately tripping the 14-day case-age escalation
+  guardrail before any real attempt happened. Fixed: `created_at` now
+  reflects when the recovery case was opened, independent of `due_at`.
+- **`AuditEvent.timestamp` collisions** — `datetime.utcnow()` as a
+  Python-side default produced identical timestamps for events written
+  in the same flush (e.g. `action_proposed` immediately followed by
+  `compliance_check`), breaking chronological ordering. Fixed: switched
+  to Postgres server-side `clock_timestamp()`, evaluated per row.
+
 ### Tests
 
 ```
@@ -202,7 +229,7 @@ npm run dev
 | 3 | Policy engine (proposal + guardrails) | Done |
 | 4 | Execution layer + batch runner | Done |
 | 5 | Voice recovery channel | Done |
-| 6 | B2B receivables flow | Not started |
+| 6 | B2B receivables flow | Done |
 | 7 | Audit trail storage + dashboard API | Not started |
 | 8 | Frontend (dashboard, run, case drill-down) | Not started |
 | 9 | Seed-guarantee, polish, demo rehearsal | Not started |
