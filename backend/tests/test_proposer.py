@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.policy.proposer import FALLBACK_PROPOSAL, propose_action
-from tests.fakes import FakeGeminiClient
+from tests.fakes import FakeAPIError, FakeGeminiClient
 
 ALLOWED = ["no_action", "retry_now", "retry_scheduled", "send_reminder", "escalate_human", "stop_case"]
 
@@ -51,3 +51,9 @@ def test_propose_action_no_action_has_empty_params():
     result = propose_action(make_case(), make_customer(), [], ALLOWED, client=client)
     assert result["action"] == "no_action"
     assert result["params"] == {}
+
+
+def test_propose_action_falls_back_on_api_error():
+    client = FakeGeminiClient(raise_error=FakeAPIError())
+    result = propose_action(make_case(), make_customer(), [], ALLOWED, client=client)
+    assert result["action"] == FALLBACK_PROPOSAL["action"]

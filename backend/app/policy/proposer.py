@@ -8,6 +8,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from google.genai import errors
+
 from app.config import settings
 from app.detection.gemini_client import get_client
 
@@ -63,7 +65,13 @@ def build_prompt(case, customer, attempts: list, allowed_actions: list[str]) -> 
 def propose_action(case, customer, attempts: list, allowed_actions: list[str], client: Any = None) -> dict:
     client = client or get_client()
     prompt = build_prompt(case, customer, attempts, allowed_actions)
-    response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    try:
+        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    except errors.APIError:
+        # Network/quota/5xx errors fail safe exactly like an unparseable
+        # proposal - a case never gets stuck because Gemini was unreachable
+        # or rate-limited, it just escalates to a human instead.
+        return dict(FALLBACK_PROPOSAL)
     return _parse_and_validate(response.text or "", allowed_actions)
 
 

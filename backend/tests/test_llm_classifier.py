@@ -1,5 +1,5 @@
 from app.detection.llm_classifier import FALLBACK_ROOT_CAUSE, classify_by_llm
-from tests.fakes import FakeGeminiClient
+from tests.fakes import FakeAPIError, FakeGeminiClient
 
 
 def test_classify_by_llm_parses_valid_json():
@@ -33,4 +33,11 @@ def test_classify_by_llm_falls_back_on_missing_confidence():
     client = FakeGeminiClient(response_text='{"root_cause": "card_expired"}')
     result = classify_by_llm("Generic decline.", client=client)
     assert result["root_cause"] == "card_expired"
+    assert result["confidence"] == 0.0
+
+
+def test_classify_by_llm_falls_back_on_api_error():
+    client = FakeGeminiClient(raise_error=FakeAPIError())
+    result = classify_by_llm("Generic decline.", client=client)
+    assert result["root_cause"] == FALLBACK_ROOT_CAUSE
     assert result["confidence"] == 0.0

@@ -2,6 +2,17 @@
 default. Mirrors just enough of the google-genai response shape
 (`client.models.generate_content(...).text`) for our classifiers.
 """
+from google.genai import errors
+
+
+class FakeAPIError(errors.APIError):
+    """A constructible stand-in for google.genai.errors.APIError - the real
+    class requires a requests.Response to build, which tests shouldn't need
+    to fabricate just to simulate a quota/network failure.
+    """
+
+    def __init__(self, message: str = "429 RESOURCE_EXHAUSTED (fake)"):
+        Exception.__init__(self, message)
 
 
 class FakeGeminiResponse:
@@ -10,7 +21,8 @@ class FakeGeminiResponse:
 
 
 class FakeGeminiClient:
-    """Returns a fixed response, or raises if `raise_error` is set."""
+    """Returns a fixed response, or raises `raise_error` if set (e.g. a
+    google.genai.errors.APIError to simulate a quota/network failure)."""
 
     def __init__(self, response_text: str = "", raise_error: Exception | None = None):
         self._response_text = response_text

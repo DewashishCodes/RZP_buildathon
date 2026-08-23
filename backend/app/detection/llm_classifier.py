@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any
 
+from google.genai import errors
+
 from app.config import settings
 from app.constants import PAYMENT_ROOT_CAUSES
 from app.detection.gemini_client import get_client
@@ -31,7 +33,12 @@ def classify_by_llm(raw_failure_reason: str, client: Any = None) -> dict:
         message=raw_failure_reason,
         root_causes=", ".join(PAYMENT_ROOT_CAUSES),
     )
-    response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    try:
+        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    except errors.APIError:
+        # Network/quota/5xx errors fail safe exactly like unparseable output -
+        # a case never gets stuck because Gemini was unreachable or rate-limited.
+        return {"root_cause": FALLBACK_ROOT_CAUSE, "confidence": 0.0}
     return _parse_response(response.text or "")
 
 
