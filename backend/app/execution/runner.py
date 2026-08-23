@@ -172,6 +172,7 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
     if action == "stop_case":
         case.status = "written_off"
         case.outcome = "unrecovered"
+        case.next_action_at = None
         db.add(case)
         if decision["source"] != "stopping_rule":
             db.add(
@@ -188,6 +189,7 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
 
     if action == "escalate_human":
         case.status = "escalated_human"
+        case.next_action_at = None
         db.add(case)
         if decision["source"] != "stopping_rule":
             db.add(
@@ -250,6 +252,7 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
         case.status = "recovered"
         case.outcome = "recovered"
         case.recovered_amount = outcome["recovered_amount"]
+        case.next_action_at = None
         db.add(case)
         db.commit()
         return {"terminal": True, "next_sim_now": None}

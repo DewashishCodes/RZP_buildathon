@@ -173,3 +173,34 @@ def test_process_due_cases_reports_counts():
         assert result["processed"] == 0  # nothing scheduled since the only case already terminated
     finally:
         db.close()
+
+
+def test_next_action_at_cleared_if_instant_run_picks_up_a_scheduled_case():
+    """Regression test: a case left "recovering" with next_action_at set by
+    a non-instant round must not keep a stale next_action_at if it later
+    reaches a terminal state via a normal instant run_batch call (which
+    can happen since "recovering" isn't a terminal status and gets swept
+    up by any later run_batch regardless of mode). Found via a live batch
+    where GET /cases/scheduled listed already-escalated cases because the
+    terminal branches only cleared next_action_at in the deferred-mode
+    wrapper, not centrally.
+    """
+    db = SessionLocal()
+    try:
+        case = _make_case(db, "Card expired")  # near-0% retry_now success
+        client = FakeGeminiClient(response_text='{"action": "retry_now", "params": {}, "rationale": "n/a"}')
+
+        run_batch(db, llm_client=client, instant=False)
+        db.refresh(case)
+        assert case.status == "recovering"
+        assert case.next_action_at is not None
+
+        # picked up again, this time by a normal instant run - drives it
+        # through the remaining rounds to a terminal state in one call
+        run_batch(db, llm_client=client, instant=True)
+        db.refresh(case)
+
+        assert case.status in TERMINAL_STATUSES
+        assert case.next_action_at is None
+    finally:
+        db.close()
