@@ -18,6 +18,13 @@ BASE_SUCCESS_RATES: dict[tuple[str, str], float] = {
     ("issuer_declined", "escalate_human"): 0.35,
     ("bank_timeout", "retry_now"): 0.70,
     ("mandate_revoked", "send_update_link"): 0.40,
+    # voice_call as an escalation channel for payment/mandate leaks (Phase 5):
+    # a human-ish conversation is more persuasive than a nudge but this is a
+    # last-resort channel, so still below a well-timed scheduled retry.
+    ("insufficient_funds", "voice_call"): 0.45,
+    ("card_expired", "voice_call"): 0.50,
+    ("issuer_declined", "voice_call"): 0.35,
+    ("mandate_revoked", "voice_call"): 0.35,
     ("overdue_early", "send_reminder"): 0.35,
     ("overdue_mid", "send_reminder"): 0.30,
     ("overdue_mid", "request_promise_to_pay"): 0.50,
