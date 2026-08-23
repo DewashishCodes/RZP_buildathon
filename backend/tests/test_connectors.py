@@ -2,13 +2,14 @@ import random
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from app.execution.connectors import execute_contact_action
+from app.execution.connectors import execute_contact_action, execute_voice_call
+from tests.fakes import FakeGeminiClient
 
 NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
 
 
-def make_case(root_cause="insufficient_funds", amount=1000):
-    return SimpleNamespace(root_cause=root_cause, amount=amount)
+def make_case(root_cause="insufficient_funds", amount=1000, case_type="payment_failure"):
+    return SimpleNamespace(root_cause=root_cause, amount=amount, type=case_type)
 
 
 def make_customer(profile="cooperative"):
@@ -85,3 +86,50 @@ def test_retry_actions_are_never_opted_out_of():
     customer = make_customer(profile="hostile")
     outcomes = [execute_contact_action(case, customer, "retry_now", now=NOW, rng=rng)["attempt_outcome"] for _ in range(200)]
     assert "opt_out" not in outcomes
+
+
+# ---- voice_call connector ----
+
+
+def test_execute_voice_call_hostile_customer_can_opt_out_without_conversation():
+    case = make_case(root_cause="insufficient_funds")
+    customer = make_customer(profile="hostile")
+    client = FakeGeminiClient(response_text='{"consent": false, "action": "none"}')
+
+    found_opt_out = False
+    for seed in range(100):
+        calls_before = len(client.calls)
+        result = execute_voice_call(case, customer, now=NOW, rng=random.Random(seed), llm_client=client)
+        if result["attempt_outcome"] == "opt_out":
+            found_opt_out = True
+            assert result["transcript"] is None
+            assert len(client.calls) == calls_before  # no LLM calls made for this opted-out round
+            break
+    assert found_opt_out
+
+
+def test_execute_voice_call_no_consent_is_failure_with_transcript():
+    case = make_case(root_cause="insufficient_funds")
+    customer = make_customer(profile="cooperative")  # never opts out
+    client = FakeGeminiClient(response_text='{"consent": false, "action": "none"}')
+
+    result = execute_voice_call(case, customer, now=NOW, rng=random.Random(1), llm_client=client)
+
+    assert result["attempt_outcome"] == "failure"
+    assert result["recovered"] is False
+    assert result["transcript"] is not None
+    assert len(client.calls) > 0
+
+
+def test_execute_voice_call_promise_to_pay_consent_sets_outcome_and_date():
+    case = make_case(root_cause="insufficient_funds")
+    customer = make_customer(profile="cooperative")
+    client = FakeGeminiClient(
+        response_text='{"consent": true, "action": "promise_to_pay", "promise_to_pay_date_offset_days": 5}'
+    )
+
+    result = execute_voice_call(case, customer, now=NOW, rng=random.Random(2), llm_client=client)
+
+    assert result["attempt_outcome"] == "promise_to_pay"
+    assert result["promise_to_pay_date"] is not None
+    assert result["transcript"] is not None

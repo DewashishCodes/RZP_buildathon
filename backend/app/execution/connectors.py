@@ -4,15 +4,19 @@ and returns a normalized outcome the batch runner turns into an Attempt +
 AuditEvents. Only this layer is allowed to import the recoverability
 model - detection and policy code never see it.
 
-`voice_call` gets a plain recoverability-model roll here, same as any
-other contact action, as a stand-in so a full batch can still reach a
-terminal state end to end. Phase 5 replaces this with the real two-role
-Hinglish conversation + transcript extraction; the recoverability roll
-itself doesn't change, only how the outcome is produced.
+`execute_contact_action` handles every non-voice channel. `voice_call`
+goes through `execute_voice_call`, which runs the real two-role Hinglish
+conversation (app/execution/voice.py) for the transcript/audit trail, but
+still rolls against the same hidden recoverability model for whether
+money actually gets recovered - the conversation shapes how the outcome
+is labeled (e.g. "promise_to_pay" vs generic "success"), not whether it
+happened, consistent with every other channel.
 """
 import random
 from datetime import date, datetime, timedelta
+from typing import Any
 
+from app.execution import voice
 from app.simulation.recoverability import roll_outcome
 
 # Customers who won't engage sometimes opt out outright rather than just
@@ -70,4 +74,57 @@ def execute_contact_action(case, customer, action: str, now: datetime, rng: rand
         "recovered": success,
         "recovered_amount": float(case.amount) if success else 0.0,
         "promise_to_pay_date": None,
+    }
+
+
+def execute_voice_call(
+    case, customer, now: datetime, rng: random.Random | None = None, llm_client: Any = None
+) -> dict:
+    """Runs the voice channel: opt-out pre-check (customer never even takes
+    the call), then the scripted conversation + extraction, then a
+    recoverability-model roll for the actual outcome. Returns everything
+    execute_contact_action returns, plus "transcript".
+    """
+    rng = rng or random.Random()
+
+    if _roll_opt_out(customer, rng):
+        return {
+            "attempt_outcome": "opt_out",
+            "recovered": False,
+            "recovered_amount": 0.0,
+            "promise_to_pay_date": None,
+            "transcript": None,
+        }
+
+    turns = voice.run_conversation(case, customer, client=llm_client)
+    extraction = voice.extract_outcome(turns, client=llm_client, now=now)
+    transcript = voice.format_transcript_for_storage(turns)
+
+    roll = roll_outcome(case.root_cause, "voice_call", customer.responsiveness_profile, rng=rng)
+    success = bool(roll["success"])
+
+    if not extraction["consent"]:
+        return {
+            "attempt_outcome": "failure",
+            "recovered": False,
+            "recovered_amount": 0.0,
+            "promise_to_pay_date": None,
+            "transcript": transcript,
+        }
+
+    if extraction["action"] == "promise_to_pay":
+        return {
+            "attempt_outcome": "promise_to_pay",
+            "recovered": success,
+            "recovered_amount": float(case.amount) if success else 0.0,
+            "promise_to_pay_date": extraction["promise_to_pay_date"],
+            "transcript": transcript,
+        }
+
+    return {
+        "attempt_outcome": "success" if success else "failure",
+        "recovered": success,
+        "recovered_amount": float(case.amount) if success else 0.0,
+        "promise_to_pay_date": None,
+        "transcript": transcript,
     }
