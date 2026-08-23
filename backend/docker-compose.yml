@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rzp_recovery_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recovery
+      POSTGRES_PASSWORD: recovery
+      POSTGRES_DB: revenue_recovery
+    ports:
+      - "5432:5432"
+    volumes:
+      - rzp_recovery_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recovery -d revenue_recovery"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rzp_recovery_pgdata:
