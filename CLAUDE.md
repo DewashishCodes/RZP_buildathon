@@ -373,6 +373,67 @@ npm install
 npm run dev
 ```
 
+## Phase 9: seed-guarantee, demo script, known limitations
+
+### Seed-guarantee (PRD §16: "don't rely on random generation alone")
+
+`app/simulation/guaranteed_cases.py` adds six hand-crafted scenario cases
+on top of every random batch — both `app/simulation/seed.py:seed_batch`
+(default `include_guaranteed=True`) and `POST /batches/run` include them
+unconditionally, so even a demo-sized batch of 5-10 random cases is
+certain to contain each key scenario. Four are **fully deterministic
+guarantees** (pure `check_stopping_rules` code, no LLM involved, so they
+cannot fail to fire):
+
+- `fraud_suspected` payment case → `fraud_or_dispute_auto_escalate`
+- `disputed` receivable → `fraud_or_dispute_auto_escalate`
+- a payment case pre-loaded with 4 prior `Attempt` rows → `max_total_contacts`
+- a payment case backdated 16 days → `case_age_exceeded`
+
+The other two are **biased, not guaranteed** — they depend on what the
+real Gemini policy call actually proposes, and there's no way to force
+that without substituting a fixed LLM response (which would defeat the
+point of a live batch):
+
+- a DND-registered customer on a severely overdue, high-value,
+  already-SMS-nudged receivable — the shape of case a policy should
+  escalate to `voice_call`, which the DND compliance rule then has to
+  substitute back to `send_reminder`. Verified live (see walkthrough
+  below): Gemini proposed `voice_call` three rounds running, DND
+  substituted it every time, then `max_total_contacts` escalated it —
+  exactly the PRD §15 step 6 demo moment.
+- a cooperative customer on a mid-overdue receivable — the shape most
+  likely to produce a `promise_to_pay` outcome (honored or broken),
+  since `request_promise_to_pay` already has a 50% "gives a promise"
+  base rate for `overdue_mid` in the hidden recoverability model.
+
+`tests/test_guaranteed_cases.py` asserts the four deterministic
+scenarios actually classify and trip their stopping rule; the DND/PTP
+scenarios are only asserted on their input shape (can't unit-test real
+LLM behavior).
+
+### Demo script rehearsal (PRD §15)
+
+Ran the full script live against a fresh batch: trigger a batch →
+dashboard populates → drill into an `insufficient_funds` case → drill
+into a `card_expired`/`send_update_link` case → drill into the
+`max_total_contacts`-escalated case (guardrail firing) → drill into the
+DND-substitution case (compliance logic firing) → play a voice
+transcript → read one case's audit trail end-to-end. All eight steps
+work as scripted against the guaranteed-cases batch.
+
+**Known limitation carried into the demo**: a burst of several real
+Gemini policy calls within one small batch can trip the free-tier
+per-minute rate limit mid-run (see the burst-rate-limit note earlier in
+this file); the fail-safe (`escalate_human` with rationale "LLM proposal
+was unparseable or invalid; failing safe to human escalation") handles
+it gracefully but can occasionally consume the promise-to-pay bias
+case's LLM call before it gets a real proposal. Not a correctness bug —
+re-running the batch (a fresh Gemini call budget) reliably reproduces the
+promise-to-pay scenario. Keep batch runs small (~10-15 cases total,
+which the 6 guaranteed cases already count toward) per the existing
+rate-limit guidance.
+
 ## Env vars
 
 | Var | Purpose |
@@ -395,7 +456,7 @@ npm run dev
 | 6 | B2B receivables flow | Done |
 | 7 | Audit trail storage + dashboard API | Done |
 | 8 | Frontend (dashboard, run, case drill-down) | Done |
-| 9 | Seed-guarantee, polish, demo rehearsal | Not started |
+| 9 | Seed-guarantee, polish, demo rehearsal | Done |
 
 Full phase plan: `C:\Users\Dewashish Lambore\.claude\plans\go-through-the-prd-snuggly-cerf.md`
 
