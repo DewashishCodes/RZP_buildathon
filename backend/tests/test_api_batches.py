@@ -10,10 +10,13 @@ from fastapi.testclient import TestClient
 import app.detection.gemini_client as gemini_client_module
 from app.api.main import app
 from app.db.session import SessionLocal
+from app.simulation.guaranteed_cases import build_guaranteed_cases
 from app.simulation.merchants import seed_merchants
 from tests.fakes import FakeGeminiClient
 
 client = TestClient(app)
+
+N_GUARANTEED = len(build_guaranteed_cases()[1])
 
 
 def _patch_gemini(monkeypatch, response_text='{"action": "retry_now", "params": {}, "rationale": "test"}'):
@@ -39,8 +42,8 @@ def test_run_batch_returns_batch_id_and_summary(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert "batch_id" in data
-    assert data["n_cases"] == 5
-    assert data["n_customers"] == 5
+    assert data["n_cases"] == 5 + N_GUARANTEED
+    assert data["n_customers"] == 5 + N_GUARANTEED
     assert "summary" in data
 
 
