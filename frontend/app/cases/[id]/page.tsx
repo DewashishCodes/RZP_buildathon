@@ -1,11 +1,61 @@
 import Link from "next/link";
-import { getCaseTimeline } from "@/lib/api";
+import { getCaseTimeline, type AuditEvent } from "@/lib/api";
 import { EventTimeline } from "@/components/event-timeline";
 import { StatusBadge } from "@/components/status-badge";
-import { ArrowRightIcon, PhoneIcon } from "@/components/icons";
+import { ArrowRightIcon, ChatIcon, ShieldIcon } from "@/components/icons";
 
 function formatRs(n: number) {
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * The judge's first question about any case is "why did it do that?" - this
+ * answers it up front from the audit trail that already exists (first
+ * action_proposed rationale + its compliance verdict) instead of making
+ * them scroll the timeline.
+ */
+function WhyThisAction({ events }: { events: AuditEvent[] }) {
+  const proposed = events.find((e) => e.event_type === "action_proposed");
+  const compliance = events.find((e) => e.event_type === "compliance_check");
+
+  const action = proposed?.payload.action;
+  const rationale = proposed?.payload.rationale;
+  if (typeof rationale !== "string" || !rationale) return null;
+
+  const substituted = compliance?.payload.substituted === true;
+  const passed = compliance?.payload.passed === true;
+  const reason = typeof compliance?.payload.reason === "string" ? compliance.payload.reason : undefined;
+
+  return (
+    <div className="rounded-xl border border-accent/30 bg-accent/5 p-5">
+      <div className="flex items-center gap-2">
+        <ChatIcon className="h-4 w-4 text-accent" />
+        <h2 className="text-sm font-semibold text-text-primary">Why this action?</h2>
+      </div>
+      {typeof action === "string" && (
+        <p className="mt-2.5 text-sm text-text-primary">
+          Agent proposed <span className="font-mono text-xs">{action}</span>
+        </p>
+      )}
+      <p className="mt-1 text-sm leading-relaxed text-text-secondary">&ldquo;{rationale}&rdquo;</p>
+      {compliance && (
+        <div className="mt-3 flex items-start gap-2.5 border-t border-border pt-3">
+          <ShieldIcon className={`mt-0.5 h-4 w-4 shrink-0 ${substituted ? "text-status-warning" : "text-status-good"}`} />
+          <div className="text-xs">
+            <span className={substituted ? "text-status-warning" : "text-status-good"}>
+              {substituted ? "Guardrail rewrote it" : passed ? "Compliance check passed" : "Compliance check failed"}
+            </span>
+            {reason && (
+              <>
+                {" · "}
+                <span className="text-text-muted">{reason}</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -26,11 +76,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   }
 
   const { case: c, events, attempts } = timeline;
+  // Preserve the batch context so drilling into a case and coming back
+  // doesn't land on the dashboard's "No batch selected" dead end.
+  const dashboardHref = c.batch_id ? `/dashboard?batch=${c.batch_id}` : "/dashboard";
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-10 px-6 py-12">
       <div>
-        <Link href="/dashboard" className="text-sm text-text-muted hover:text-text-primary">
+        <Link href={dashboardHref} className="text-sm text-text-muted hover:text-text-primary">
           ← Back to dashboard
         </Link>
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -41,6 +94,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         </div>
         <p className="mt-1 font-mono text-xs text-text-muted">{c.id}</p>
       </div>
+
+      <WhyThisAction events={events} />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-border bg-surface-1 p-4">
@@ -69,44 +124,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       )}
 
       <section>
-        <h2 className="mb-4 text-lg font-medium text-text-primary">Timeline ({events.length} events)</h2>
-        <EventTimeline events={events} />
+        <h2 className="mb-4 text-lg font-medium text-text-primary">Timeline ({events.length + attempts.length})</h2>
+        <EventTimeline events={events} attempts={attempts} />
       </section>
 
-      {attempts.length > 0 && (
-        <section>
-          <h2 className="mb-4 text-lg font-medium text-text-primary">Attempts ({attempts.length})</h2>
-          <div className="flex flex-col gap-3">
-            {attempts.map((a) => (
-              <div key={a.id} className="rounded-lg border border-border bg-surface-1 px-4 py-3">
-                <div className="flex items-baseline justify-between gap-4 text-sm">
-                  <span className="font-medium text-text-primary">
-                    {a.action} via {a.channel}
-                  </span>
-                  <span className="text-xs text-text-muted">{new Date(a.timestamp).toLocaleString()}</span>
-                </div>
-                <div className="mt-1 text-sm text-text-secondary">
-                  outcome: <span className="text-text-primary">{a.outcome}</span>
-                  {a.promise_to_pay_date && <> · promised: {a.promise_to_pay_date}</>}
-                </div>
-                {a.transcript && (
-                  <details className="mt-3 group">
-                    <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary">
-                      <PhoneIcon className="h-3 w-3" />
-                      View call transcript
-                    </summary>
-                    <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
-                      {a.transcript}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <Link href="/dashboard" className="inline-flex w-fit items-center gap-1.5 text-sm text-text-muted hover:text-text-primary">
+      <Link href={dashboardHref} className="inline-flex w-fit items-center gap-1.5 text-sm text-text-muted hover:text-text-primary">
         Back to dashboard
         <ArrowRightIcon className="h-3.5 w-3.5" />
       </Link>
