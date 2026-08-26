@@ -15,6 +15,7 @@ from google.genai import errors
 from app.config import settings
 from app.constants import PAYMENT_ROOT_CAUSES
 from app.detection.gemini_client import get_client
+from app.llm_resilience import call_with_resilience
 
 PROMPT_TEMPLATE = """You are classifying the root cause of a failed payment for an Indian fintech revenue-recovery system.
 
@@ -57,10 +58,13 @@ def _classify_uncached(raw_failure_reason: str, client: Any) -> dict:
         root_causes=", ".join(PAYMENT_ROOT_CAUSES),
     )
     try:
-        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
-    except errors.APIError:
-        # Network/quota/5xx errors fail safe exactly like unparseable output -
-        # a case never gets stuck because Gemini was unreachable or rate-limited.
+        response = call_with_resilience(
+            lambda: client.models.generate_content(model=settings.gemini_model, contents=prompt)
+        )
+    except (errors.APIError, OSError):
+        # Unrecoverable API/network errors fail safe exactly like unparseable
+        # output - a case never gets stuck because Gemini was unreachable or
+        # rate-limited. Transient errors were already retried with backoff.
         return {"root_cause": FALLBACK_ROOT_CAUSE, "confidence": 0.0}
     return _parse_response(response.text or "")
 
