@@ -38,10 +38,10 @@ export default function Home() {
 
       <div className="flex gap-3">
         <Link
-          href="/run"
+          href="/run?demo=1"
           className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-strong"
         >
-          Run a batch
+          Run demo batch
           <ArrowRightIcon className="h-3.5 w-3.5" />
         </Link>
         <Link
