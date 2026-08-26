@@ -53,7 +53,7 @@ def decide_action(
         }
 
     allowed_actions = get_allowed_actions(case.type)
-    proposal = propose_action(case, customer, attempts, allowed_actions, client=llm_client)
+    proposal = propose_action(case, customer, attempts, allowed_actions, client=llm_client, now=now)
     db.add(
         AuditEvent(
             case_id=case.id,
