@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Repo guide for the AI Revenue Recovery Agent (Razorpay Buildathon, Track 03).
+Repo guide for Janus, the AI Revenue Recovery Agent (Razorpay Buildathon, Track 03).
 See `revenue-recovery-agent-prd.md` for the full product spec and
 `revenue-recovery-agent-prd.md` §14 for the original 12-day plan (this repo
 follows the phased breakdown in the approved plan instead — see phase status

@@ -1,4 +1,4 @@
-# PRD: AI Revenue Recovery Agent
+# PRD: Janus — AI Revenue Recovery Agent
 **Razorpay Buildathon — Track 03: AI Revenue Recovery**
 Owner: Dewashish | Submission deadline: Sept 3, 2026 | Build start: Aug 22, 2026
 

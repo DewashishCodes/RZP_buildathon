@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Revenue Recovery Agent", lifespan=lifespan)
+app = FastAPI(title="Janus — AI Revenue Recovery Agent", lifespan=lifespan)
 
 # Local-dev-only CORS: the Next.js dashboard runs on a different origin
 # (localhost:3000) than this API (localhost:8000). No auth/cookies in this

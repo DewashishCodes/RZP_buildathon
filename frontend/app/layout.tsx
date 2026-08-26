@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Revenue Recovery Agent",
+  title: "Janus — AI Revenue Recovery Agent",
   description: "Razorpay Buildathon — Track 03: AI Revenue Recovery",
 };
 

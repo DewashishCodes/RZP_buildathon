@@ -1,11 +1,13 @@
-# AI Revenue Recovery Agent
+# Janus
 
-**Razorpay Buildathon — Track 03: AI Revenue Recovery**
+**AI Revenue Recovery Agent — Razorpay Buildathon, Track 03**
 
-Revenue leaks out of a business through disconnected failure points: failed
-card/UPI debits, failed subscription mandates, and overdue B2B invoices. Each
-is usually handled reactively, generically, and without a record of what was
-tried or why. This project is a single agent that **detects** revenue at
+Named for the Roman god of doorways and transitions, who looks both ways at
+once and decides what passes through. Revenue leaks out of a business
+through disconnected failure points: failed card/UPI debits, failed
+subscription mandates, and overdue B2B invoices. Each is usually handled
+reactively, generically, and without a record of what was tried or why.
+Janus is a single agent that **detects** revenue at
 risk across all three leak types, **diagnoses** the root cause per case,
 **chooses** a bounded recovery action across an escalating channel ladder
 (nudge → SMS/email → voice → human), **executes** it, and **reports**

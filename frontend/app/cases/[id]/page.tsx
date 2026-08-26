@@ -10,9 +10,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   try {
     const { case: c } = await getCaseTimeline(id);
     const label = c.root_cause ?? c.type;
-    return { title: `Case · ${label} — AI Revenue Recovery Agent` };
+    return { title: `Case · ${label} — Janus` };
   } catch {
-    return { title: "Case not found — AI Revenue Recovery Agent" };
+    return { title: "Case not found — Janus" };
   }
 }
 

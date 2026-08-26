@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: rzp_recovery_db
+    container_name: janus_db
     restart: unless-stopped
     environment:
       POSTGRES_USER: recovery
@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - rzp_recovery_pgdata:/var/lib/postgresql/data
+      - janus_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U recovery -d revenue_recovery"]
       interval: 5s
@@ -18,4 +18,4 @@ services:
       retries: 10
 
 volumes:
-  rzp_recovery_pgdata:
+  janus_pgdata:

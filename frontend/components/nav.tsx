@@ -43,9 +43,9 @@ export function Nav() {
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-xs font-bold text-white">
-              R
+              J
             </span>
-            <span className="text-sm font-semibold tracking-tight text-text-primary">Revenue Recovery</span>
+            <span className="text-sm font-semibold tracking-tight text-text-primary">Janus</span>
           </Link>
           <div className="flex items-center gap-1">
             {LINKS.map((link) => {

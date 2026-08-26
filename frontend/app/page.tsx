@@ -27,12 +27,14 @@ export default function Home() {
           Razorpay Buildathon · Track 03
         </span>
         <h1 className="text-4xl font-semibold tracking-tight text-text-primary">
-          AI Revenue Recovery Agent
+          Janus
+          <span className="ml-3 align-middle text-base font-medium text-text-muted">AI Revenue Recovery Agent</span>
         </h1>
         <p className="max-w-xl text-base leading-relaxed text-text-secondary">
-          Detects revenue at risk across payment/mandate failures and B2B receivables, diagnoses
-          root cause, proposes a bounded recovery action, enforces hard-coded guardrails, and
-          reports measured recovery with a full audit trail.
+          Named for the god of thresholds: detects revenue at risk across payment/mandate
+          failures and B2B receivables, diagnoses root cause, proposes a bounded recovery action,
+          enforces hard-coded guardrails at every doorway it opens, and reports measured recovery
+          with a full audit trail.
         </p>
       </div>
 
