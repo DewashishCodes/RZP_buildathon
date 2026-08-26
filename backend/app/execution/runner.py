@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.detection.service import run_detection_on_batch
 from app.execution.connectors import execute_contact_action, execute_voice_call
@@ -59,7 +59,15 @@ def run_batch(
 
     run_detection_on_batch(db, llm_client=llm_client, now=now, case_ids=case_ids)
 
-    stmt = select(Case).where(Case.type.in_(RUNNER_SCOPE_TYPES), Case.status.notin_(TERMINAL_STATUSES))
+    stmt = (
+        select(Case)
+        .where(Case.type.in_(RUNNER_SCOPE_TYPES), Case.status.notin_(TERMINAL_STATUSES))
+        # Eager-load what every round reads (customer + attempt history);
+        # without this the per-case loop lazy-loaded both, one query pair
+        # per case. Later rounds still refresh, but those are two indexed
+        # point lookups rather than a first-round N+1.
+        .options(selectinload(Case.customer), selectinload(Case.attempts))
+    )
     if case_ids is not None:
         stmt = stmt.where(Case.id.in_(case_ids))
     cases = db.execute(stmt).scalars().all()
@@ -70,7 +78,7 @@ def run_batch(
             _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now)
 
     db.commit()
-    return summarize(db)
+    return summarize(db, case_ids=[c.id for c in cases])
 
 
 def process_due_cases(db: Session, llm_client=None, now: datetime | None = None, merchant_id=None) -> dict:
@@ -81,7 +89,11 @@ def process_due_cases(db: Session, llm_client=None, now: datetime | None = None,
     """
     now = now or datetime.now(timezone.utc)
 
-    stmt = select(Case).where(Case.next_action_at.is_not(None), Case.status.notin_(TERMINAL_STATUSES))
+    stmt = (
+        select(Case)
+        .where(Case.next_action_at.is_not(None), Case.status.notin_(TERMINAL_STATUSES))
+        .options(selectinload(Case.customer), selectinload(Case.attempts))
+    )
     if merchant_id is not None:
         stmt = stmt.where(Case.merchant_id == merchant_id)
     cases = db.execute(stmt).scalars().all()
@@ -166,7 +178,12 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
 
     if action == "no_action":
         # Not terminal, but nothing happened this round either - treat as
-        # "check back later" with the standard round advance.
+        # "check back later" with the standard round advance. Commit here:
+        # decide_action already added action_proposed/compliance_check
+        # AuditEvents to the session, and returning without committing
+        # left them pending until some arbitrary later commit (lost
+        # entirely if the batch crashed first).
+        db.commit()
         return {"terminal": False, "next_sim_now": sim_now + ROUND_ADVANCE}
 
     if action == "stop_case":
@@ -271,18 +288,22 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
     return {"terminal": False, "next_sim_now": next_sim_now}
 
 
-def summarize(db: Session) -> dict:
-    total_at_risk = db.scalar(select(func.sum(Case.amount)).where(Case.type.in_(RUNNER_SCOPE_TYPES))) or 0
-    total_recovered = (
-        db.scalar(select(func.sum(Case.recovered_amount)).where(Case.type.in_(RUNNER_SCOPE_TYPES))) or 0
-    )
-    total_cases = db.scalar(select(func.count()).select_from(Case).where(Case.type.in_(RUNNER_SCOPE_TYPES))) or 0
+def summarize(db: Session, case_ids: list | None = None) -> dict:
+    """Summarizes exactly the cases this run covered when case_ids is
+    given. Unscoped, these queries aggregated the whole table - CLI runs
+    printed cumulative numbers spanning every batch ever seeded while the
+    API route silently recomputed a batch-scoped summary, i.e. two
+    different answers for the same run depending on entry point.
+    """
+    scope = Case.type.in_(RUNNER_SCOPE_TYPES)
+    if case_ids is not None:
+        scope = Case.id.in_(case_ids)
 
-    status_counts = dict(
-        db.execute(
-            select(Case.status, func.count()).where(Case.type.in_(RUNNER_SCOPE_TYPES)).group_by(Case.status)
-        ).all()
-    )
+    total_at_risk = db.scalar(select(func.sum(Case.amount)).where(scope)) or 0
+    total_recovered = db.scalar(select(func.sum(Case.recovered_amount)).where(scope)) or 0
+    total_cases = db.scalar(select(func.count()).select_from(Case).where(scope)) or 0
+
+    status_counts = dict(db.execute(select(Case.status, func.count()).where(scope).group_by(Case.status)).all())
 
     recovery_rate = float(total_recovered) / float(total_at_risk) if total_at_risk else 0.0
 
