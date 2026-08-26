@@ -545,6 +545,65 @@ Note for future work: DB-backed tests still write to the dev Postgres —
 the conftest only disables LLM pacing; transaction-per-test isolation is
 the known next step.
 
+**Resolved**: see the Pre-public hardening section below —
+`tests/conftest.py`'s `db_transaction` fixture now wraps every test in a
+transaction rolled back at teardown.
+
+## Pre-public hardening (Track C)
+
+A pass done before making the repo public, in preparation for the
+buildathon submission. Ordered C → B → A → D against the submission
+form's asks; this is Track C (engineering hygiene) — see Track B/A/D
+notes below once those land.
+
+- **Secrets audit** — `backend/.env` (holds the real `GEMINI_API_KEY`)
+  was already covered by `.gitignore` and never committed; checked the
+  full history with `git log --all -p -S "AIza"` and a tracked-file grep
+  for API-key-shaped strings — clean, nothing to remediate.
+- **Dockerfiles + one-command full-stack compose** — `backend/Dockerfile`
+  (runs `alembic upgrade head` then `uvicorn`) and `frontend/Dockerfile`
+  (multi-stage, Next.js `output: "standalone"`). Root `docker-compose.yml`
+  wires db + backend + frontend so `docker compose up` (with
+  `GEMINI_API_KEY` in the environment) boots the whole stack for a judge
+  without a local Python/Node install; `backend/docker-compose.yml`
+  (db-only) is unchanged for the existing local dev workflow above.
+- **Test-DB isolation** — `tests/conftest.py`'s `db_transaction` autouse
+  fixture wraps every test in one transaction + SAVEPOINT, rolled back at
+  teardown (the standard SQLAlchemy "join a session into an external
+  transaction" recipe). `app.db.session.SessionLocal` became a plain
+  function reading a swappable module-level factory at call time, so the
+  override reaches every `SessionLocal()` call site without patching each
+  one individually. This immediately caught `test_api_merchants_tickets_jobs.py`
+  silently depending on merchant rows another test file happened to
+  commit first — fixed by seeding explicitly per test. Also reset the dev
+  Postgres volume to clear years of pre-fixture accumulation; the suite
+  now runs in ~13s (was ~43s) and leaves zero rows behind.
+- **Architecture-invariant test** — already landed prior to this pass
+  (`tests/test_architecture_invariants.py`): asserts detection/policy
+  modules never import the hidden recoverability model.
+- **Atomic due-case claiming** — `process_due_cases` (`POST
+  /jobs/run-due`) now claims rows with `SELECT ... FOR UPDATE SKIP
+  LOCKED` instead of a plain `SELECT`, so two overlapping calls (a real
+  cron firing twice, a judge double-clicking "process due jobs now")
+  can't both grab and re-run the same case.
+- **Idempotency key on batch runs** — `POST /batches/run` accepts an
+  optional `idempotency_key`; a retry with the same `(merchant_id,
+  idempotency_key)` returns the original batch instead of seeding a
+  duplicate one. `BatchRun` rows are now always created (previously only
+  for `background=true`) so idempotency has somewhere to look the key up
+  regardless of mode, and the sync path now flips its own row through
+  `running → complete` like the background path already did. A race on
+  the same key hits the table's partial unique index
+  (migration `c4f9a1e2b3d5`); the loser's `IntegrityError` is caught and
+  it returns the winner's batch instead of erroring.
+- **Fail-fast Gemini key** — `get_client()` now raises immediately with
+  an actionable message if `GEMINI_API_KEY` is unset, instead of an
+  opaque auth error on the first real call.
+- **DB-pinging `/health`** — no longer a static `{"status": "ok"}`; it
+  runs `SELECT 1` against Postgres and reports whether
+  `GEMINI_API_KEY` is configured, so a misconfigured environment
+  surfaces at the health check instead of mid-batch during a demo.
+
 ## Phase status
 
 | Phase | Description | Status |
