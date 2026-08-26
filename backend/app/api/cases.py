@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.audit.timeline import get_case_timeline, list_cases, list_scheduled_cases
+from app.constants import CASE_STATUSES, CASE_TYPES
 from app.db.session import get_db
 
 from .schemas import CaseOut, CaseTimelineResponse
@@ -17,10 +18,17 @@ def list_cases_route(
     merchant_id: uuid.UUID | None = None,
     status: str | None = None,
     type: str | None = Query(default=None, alias="type"),
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
+    # Validate filters against the taxonomy instead of silently returning
+    # an empty list for a typo'd value ("recoveredd" should be a 400, not
+    # a confusing zero rows).
+    if status is not None and status not in CASE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of: {', '.join(CASE_STATUSES)}")
+    if type is not None and type not in CASE_TYPES:
+        raise HTTPException(status_code=400, detail=f"type must be one of: {', '.join(CASE_TYPES)}")
     return list_cases(
         db, batch_id=batch_id, merchant_id=merchant_id, status=status, case_type=type, limit=limit, offset=offset
     )
