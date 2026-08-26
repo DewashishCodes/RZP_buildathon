@@ -12,6 +12,7 @@ from google.genai import errors
 
 from app.config import settings
 from app.detection.gemini_client import get_client
+from app.llm_resilience import call_with_resilience
 
 # Fail-safe when the LLM output can't be parsed/trusted: escalate to a
 # human rather than silently doing nothing or guessing an action.
@@ -62,20 +63,38 @@ def build_prompt(case, customer, attempts: list, allowed_actions: list[str]) -> 
     )
 
 
-def propose_action(case, customer, attempts: list, allowed_actions: list[str], client: Any = None) -> dict:
+def propose_action(
+    case,
+    customer,
+    attempts: list,
+    allowed_actions: list[str],
+    client: Any = None,
+    now: datetime | None = None,
+) -> dict:
+    """`now` should be the caller's notion of the current time (the batch
+    runner's simulated clock in instant mode, real wall clock otherwise).
+    It anchors any retry_date the LLM expresses as an offset so scheduled
+    retries land on the same timeline the rest of the pipeline runs on -
+    using wall clock here made LLM-chosen offsets land days in the past
+    relative to an advanced sim clock.
+    """
     client = client or get_client()
     prompt = build_prompt(case, customer, attempts, allowed_actions)
     try:
-        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
-    except errors.APIError:
-        # Network/quota/5xx errors fail safe exactly like an unparseable
-        # proposal - a case never gets stuck because Gemini was unreachable
-        # or rate-limited, it just escalates to a human instead.
+        response = call_with_resilience(
+            lambda: client.models.generate_content(model=settings.gemini_model, contents=prompt)
+        )
+    except (errors.APIError, OSError):
+        # Unrecoverable API/network errors fail safe exactly like an
+        # unparseable proposal - a case never gets stuck because Gemini was
+        # unreachable or rate-limited, it just escalates to a human instead.
+        # Transient errors (429/5xx/timeouts) were already retried with
+        # backoff by call_with_resilience before we get here.
         return dict(FALLBACK_PROPOSAL)
-    return _parse_and_validate(response.text or "", allowed_actions)
+    return _parse_and_validate(response.text or "", allowed_actions, now=now)
 
 
-def _parse_and_validate(text: str, allowed_actions: list[str]) -> dict:
+def _parse_and_validate(text: str, allowed_actions: list[str], now: datetime | None = None) -> dict:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return dict(FALLBACK_PROPOSAL)
@@ -94,7 +113,7 @@ def _parse_and_validate(text: str, allowed_actions: list[str]) -> dict:
         params = {}
 
     if action == "retry_scheduled":
-        params = _normalize_retry_params(params)
+        params = _normalize_retry_params(params, now=now)
 
     rationale = data.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
@@ -103,11 +122,11 @@ def _parse_and_validate(text: str, allowed_actions: list[str]) -> dict:
     return {"action": action, "params": params, "rationale": rationale}
 
 
-def _normalize_retry_params(params: dict) -> dict:
+def _normalize_retry_params(params: dict, now: datetime | None = None) -> dict:
     offset_hours = params.get("retry_date_offset_hours")
     try:
         offset_hours = float(offset_hours)
     except (TypeError, ValueError):
         offset_hours = 72.0  # PRD example: insufficient_funds retry 3+ days later
-    retry_date = datetime.now(timezone.utc) + timedelta(hours=offset_hours)
+    retry_date = (now or datetime.now(timezone.utc)) + timedelta(hours=offset_hours)
     return {"retry_date": retry_date}
