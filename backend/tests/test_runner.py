@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
+import app.db.session as db_session_module
 from app.db.session import SessionLocal
 from app.execution.runner import TERMINAL_STATUSES, process_due_cases, run_batch
 from app.models import Case, Customer, Ticket
@@ -155,6 +156,39 @@ def test_process_due_cases_advances_scheduled_cases_to_terminal():
         db.refresh(case)
         assert case.status in TERMINAL_STATUSES
         assert case.next_action_at is None
+    finally:
+        db.close()
+
+
+def test_process_due_cases_claims_rows_with_for_update_skip_locked():
+    """Two overlapping /jobs/run-due calls must not both grab the same due
+    case - asserts the actual SQL process_due_cases sends to Postgres
+    includes `FOR UPDATE SKIP LOCKED`, rather than trying to orchestrate a
+    real concurrent second transaction (which the transaction-per-test
+    fixture's SAVEPOINT rollback makes impossible to observe from a
+    genuinely separate connection: nothing here ever really commits)."""
+    db = SessionLocal()
+    try:
+        _make_case(db, "Card expired")
+        client = FakeGeminiClient(response_text='{"action": "retry_now", "params": {}, "rationale": "n/a"}')
+        run_batch(db, llm_client=client, instant=False)  # leaves the case scheduled
+
+        captured_sql = []
+
+        def _capture(conn, cursor, statement, parameters, context, executemany):
+            captured_sql.append(statement)
+
+        from sqlalchemy import event
+
+        event.listen(db_session_module.engine, "before_cursor_execute", _capture)
+        try:
+            process_due_cases(db, llm_client=client)
+        finally:
+            event.remove(db_session_module.engine, "before_cursor_execute", _capture)
+
+        claim_statements = [s for s in captured_sql if "next_action_at" in s and "FOR UPDATE" in s.upper()]
+        assert claim_statements, "expected the due-case claim query to use FOR UPDATE"
+        assert "SKIP LOCKED" in claim_statements[0].upper()
     finally:
         db.close()
 

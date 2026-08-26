@@ -86,13 +86,24 @@ def process_due_cases(db: Session, llm_client=None, now: datetime | None = None,
     (Case.next_action_at is set). Mirrors what a real cron/job queue
     would do on schedule; here it's invoked manually (POST /jobs/run-due)
     so a demo doesn't have to wait for real wall-clock time to pass.
+
+    Claims rows with SELECT ... FOR UPDATE SKIP LOCKED: two overlapping
+    /jobs/run-due calls (a real cron firing twice, or a judge double-
+    clicking "process due jobs now") would otherwise both read the same
+    due case and run it twice before either commits. Locked rows are
+    silently skipped rather than blocked on, so an overlapping call picks
+    up whatever the first one hasn't claimed yet instead of stalling.
     """
     now = now or datetime.now(timezone.utc)
 
     stmt = (
         select(Case)
         .where(Case.next_action_at.is_not(None), Case.status.notin_(TERMINAL_STATUSES))
+        # selectinload issues its own separate SELECTs for customer/attempts,
+        # which don't carry the lock - only the Case row itself needs to be
+        # claimed.
         .options(selectinload(Case.customer), selectinload(Case.attempts))
+        .with_for_update(skip_locked=True)
     )
     if merchant_id is not None:
         stmt = stmt.where(Case.merchant_id == merchant_id)
