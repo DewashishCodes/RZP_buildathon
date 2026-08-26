@@ -10,6 +10,7 @@ from app.api.cases import router as cases_router
 from app.api.jobs import router as jobs_router
 from app.api.merchants import router as merchants_router
 from app.api.tickets import router as tickets_router
+from app.api.webhooks import router as webhooks_router
 from app.config import settings
 from app.db.session import SessionLocal, get_db
 from app.simulation.merchants import seed_merchants
@@ -45,6 +46,7 @@ app.include_router(cases_router)
 app.include_router(merchants_router)
 app.include_router(tickets_router)
 app.include_router(jobs_router)
+app.include_router(webhooks_router)
 
 
 @app.get("/health")

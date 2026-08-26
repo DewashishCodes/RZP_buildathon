@@ -14,7 +14,7 @@ PREFERRED_CHANNELS = ["sms", "email", "voice", "whatsapp"]
 
 CARD_ON_FILE_STATUSES = ["valid", "expired", "insufficient_funds_pattern"]
 
-ATTEMPT_CHANNELS = ["silent_retry", "sms_nudge", "email_link", "voice_call", "human_escalation"]
+ATTEMPT_CHANNELS = ["silent_retry", "sms_nudge", "email_link", "voice_call", "human_escalation", "webhook"]
 
 ATTEMPT_OUTCOMES = ["success", "failure", "no_response", "opt_out", "promise_to_pay"]
 
@@ -59,6 +59,7 @@ AUDIT_EVENT_TYPES = [
     "outcome_recorded",
     "stopped",
     "escalated",
+    "webhook_received",
 ]
 
 AUDIT_ACTORS = ["system", "llm", "human"]
