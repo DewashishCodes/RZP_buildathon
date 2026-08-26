@@ -441,6 +441,52 @@ promise-to-pay scenario. Keep batch runs small (~10-15 cases total,
 which the 6 guaranteed cases already count toward) per the existing
 rate-limit guidance.
 
+## Demo reliability (Track A)
+
+### Quota strategy: pre-run + history as backup
+
+Gemini's free tier is the single biggest live-demo risk (daily cap,
+per-minute burst cap, both documented above) - the mitigation is
+procedural, not more code:
+
+1. **Pre-run a batch before the actual demo slot**, ~10-15 cases
+   (guaranteed-cases scenarios included), and confirm it reached the
+   full drill-down set (recovered `insufficient_funds` case, a
+   `card_expired`/`send_update_link` case, a `max_total_contacts`
+   escalation, a DND compliance substitution) via one-click demo mode's
+   auto-derived story list (`/run?demo=1`).
+2. **During the live demo, don't re-run Gemini calls you don't need.**
+   Walk the pre-run batch's dashboard and case drill-downs first - the
+   audit trail already has everything (rationale, guardrail fires,
+   substitutions) without spending fresh quota.
+3. **`/history` is the fallback if live Gemini calls degrade mid-demo**
+   (a burst trips the per-minute cap, or the daily cap is close). Every
+   past run stays browsable there indefinitely - if a fresh batch
+   triggered live comes back heavy on `escalated_human` (the fail-safe
+   fallback for an exhausted-retry Gemini call, not a policy-engine
+   bug - see the burst-rate-limit note above), pivot to a pre-run batch
+   from history rather than troubleshooting quota live.
+4. If quota is tight on the day, favor `instant=true` (default) batches
+   over `instant=false` scheduling-mode demos - non-instant mode still
+   makes the same number of Gemini calls, just spread across more
+   `POST /jobs/run-due` invocations, which is more surface area for a
+   burst to land on mid-demo.
+
+### Frontend polish
+
+Every page/route has its own browser-tab title (`app/*/layout.tsx` for
+the client-rendered pages under `/dashboard`, `/history`, `/run`,
+`/tickets`; `generateMetadata` on `/cases/[id]` since it's server-
+rendered and can title itself by root cause) - previously every route
+showed the same root title, indistinguishable in a tab bar or browser
+history during a live walkthrough. Icon-only interactive elements
+(the scheduled-actions "view case" arrow, the call-transcript
+disclosure toggle) got `aria-label`/`aria-expanded`; decorative icons
+already paired with a visible text label got `aria-hidden`. Empty
+states were already solid across the app (no-batch-selected, no
+tickets yet, no batch history, nothing scheduled) - audited, not
+rebuilt.
+
 ## Env vars
 
 | Var | Purpose |
@@ -452,6 +498,8 @@ rate-limit guidance.
 | `LLM_REQUESTS_PER_MINUTE` | Client-side token-bucket cap for Gemini calls (`app/llm_resilience.py`, default 15; 0 disables pacing) |
 | `LLM_MAX_ATTEMPTS` | Retry attempts for transient LLM errors (default 3) |
 | `LLM_BACKOFF_BASE_SECONDS` | Exponential-backoff base in seconds (default 2.0) |
+| `RAZORPAY_WEBHOOK_SECRET` | HMAC-SHA256 secret for `POST /webhooks/razorpay`'s signature (empty skips verification) |
+| `REQUIRE_MERCHANT_API_KEY` | `true` to require `X-API-Key` on `POST /batches/run` and scoped `POST /jobs/run-due` (default `false`) |
 
 ### Correctness hardening (Aug 25)
 
