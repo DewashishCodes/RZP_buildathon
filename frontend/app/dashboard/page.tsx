@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getBatchSummary, listCases, type BatchSummary, type CaseSummary } from "@/lib/api";
@@ -8,6 +8,9 @@ import { StatTile } from "@/components/stat-tile";
 import { ProgressRow } from "@/components/progress-row";
 import { StatusBadge } from "@/components/status-badge";
 import { ScheduledActionsPanel } from "@/components/scheduled-actions";
+import { GuardrailFeed } from "@/components/guardrail-feed";
+import { RecoveryChart } from "@/components/recovery-chart";
+import { RecentBatches } from "@/components/recent-batches";
 import { useMerchant } from "@/components/merchant-context";
 import { ArrowRightIcon, ShieldIcon, SwapIcon } from "@/components/icons";
 
@@ -26,15 +29,27 @@ function useBatchData(batchId: string): LoadState {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getBatchSummary(batchId), listCases({ batchId })])
-      .then(([summary, cases]) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Polls while the batch still has work in flight (open/recovering
+    // cases) so a background run's ticking numbers show up here without a
+    // manual refresh; stops once everything is terminal.
+    async function load() {
+      try {
+        const [summary, cases] = await Promise.all([getBatchSummary(batchId), listCases({ batchId })]);
         if (!cancelled) setState({ summary, cases, error: null });
-      })
-      .catch((err) => {
+        if (!cancelled && cases.some((c) => c.status === "open" || c.status === "recovering")) {
+          timer = setTimeout(load, 4000);
+        }
+      } catch (err) {
         if (!cancelled) setState({ summary: null, cases: [], error: err instanceof Error ? err.message : "Failed to load batch" });
-      });
+      }
+    }
+
+    load();
     return () => {
       cancelled = true;
+      if (timer !== null) clearTimeout(timer);
     };
   }, [batchId]);
 
@@ -79,6 +94,8 @@ function BatchDashboard({ batchId }: { batchId: string }) {
         <p className="mt-1 font-mono text-xs text-text-muted">{summary.batch_id}</p>
       </div>
 
+      {merchantId && <RecentBatches merchantId={merchantId} currentBatchId={batchId} />}
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="₹ at risk" value={formatRs(summary.total_at_risk)} />
         <StatTile label="₹ recovered" value={formatRs(summary.total_recovered)} accent="good" />
@@ -110,6 +127,10 @@ function BatchDashboard({ batchId }: { batchId: string }) {
       </div>
 
       {merchantId && <ScheduledActionsPanel key={merchantId} merchantId={merchantId} />}
+
+      <RecoveryChart batchId={batchId} />
+
+      <GuardrailFeed batchId={batchId} />
 
       <section>
         <h2 className="mb-1 text-lg font-medium text-text-primary">Recovery by root cause</h2>
@@ -190,22 +211,63 @@ function BatchDashboard({ batchId }: { batchId: string }) {
   );
 }
 
+const LAST_BATCH_KEY = "revenue-recovery.last-batch";
+
+function subscribeToStoredBatch(callback: () => void) {
+  window.addEventListener("storage", callback);
+  return () => window.removeEventListener("storage", callback);
+}
+
+function getStoredBatch(): string | null {
+  try {
+    return localStorage.getItem(LAST_BATCH_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getStoredBatchServerSnapshot(): string | null {
+  return null;
+}
+
 function DashboardContent() {
   const searchParams = useSearchParams();
-  const batchId = searchParams.get("batch");
+  const batchFromUrl = searchParams.get("batch");
+  const storedBatch = useSyncExternalStore(subscribeToStoredBatch, getStoredBatch, getStoredBatchServerSnapshot);
+
+  // Persist the explicit selection as an external-store write (no state
+  // cascade); reads go through useSyncExternalStore above.
+  useEffect(() => {
+    if (!batchFromUrl) return;
+    try {
+      localStorage.setItem(LAST_BATCH_KEY, batchFromUrl);
+    } catch {
+      // best-effort persistence only
+    }
+  }, [batchFromUrl]);
+
+  const batchId = batchFromUrl ?? storedBatch;
 
   if (!batchId) {
     return (
       <div className="mx-auto flex max-w-xl flex-col items-center gap-4 px-6 py-24 text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-text-primary">No batch selected</h1>
-        <p className="text-sm text-text-secondary">Run a batch first to see its dashboard.</p>
-        <Link
-          href="/run"
-          className="mt-2 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-strong"
-        >
-          Run a batch
-          <ArrowRightIcon className="h-3.5 w-3.5" />
-        </Link>
+        <p className="text-sm text-text-secondary">Run a batch first, or pick a past one from history.</p>
+        <div className="mt-2 flex gap-3">
+          <Link
+            href="/run"
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-strong"
+          >
+            Run a batch
+            <ArrowRightIcon className="h-3.5 w-3.5" />
+          </Link>
+          <Link
+            href="/history"
+            className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:border-border-strong hover:bg-surface-1"
+          >
+            Browse history
+          </Link>
+        </div>
       </div>
     );
   }

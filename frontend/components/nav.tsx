@@ -7,6 +7,7 @@ import { useMerchant } from "./merchant-context";
 const LINKS = [
   { href: "/run", label: "Run batch" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/history", label: "History" },
   { href: "/tickets", label: "Support tickets" },
 ];
 
