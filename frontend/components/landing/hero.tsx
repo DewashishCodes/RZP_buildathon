@@ -34,9 +34,9 @@ export function Hero() {
         <p className="text-sm text-text-muted">AI Revenue Recovery Agent</p>
 
         <p className="max-w-xl text-base leading-relaxed text-text-secondary">
-          Named for the god who watches both directions of a threshold at once: Janus detects
-          revenue at risk, diagnoses root cause, and proposes a bounded recovery action - but a
-          separate, deterministic layer decides whether that action ever crosses into execution.
+          Watches both sides of every threshold: detects revenue at risk, proposes a recovery
+          action, and leaves the decision to cross into execution to a separate, deterministic
+          guardrail layer.
         </p>
 
         <div className="mt-2 flex gap-3">

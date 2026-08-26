@@ -1,4 +1,5 @@
 import { Hero } from "@/components/landing/hero";
+import { DemoVideo } from "@/components/landing/demo-video";
 import { ProofStrip } from "@/components/landing/proof-strip";
 import { Pipeline } from "@/components/landing/pipeline";
 import { GuardrailProof } from "@/components/landing/guardrail-proof";
@@ -13,6 +14,10 @@ export default function Home() {
   return (
     <div>
       <Hero />
+
+      <div className="pb-16">
+        <DemoVideo />
+      </div>
 
       <div className="mx-auto flex max-w-5xl flex-col gap-16 px-6 py-16">
         <section className="flex flex-col gap-4">
