@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
@@ -22,6 +23,7 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/batches", tags=["batches"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[BatchListItem])
@@ -100,6 +102,16 @@ def trigger_batch_run(
         raise
 
     case_ids = [case["id"] for case in cases]
+    logger.info(
+        "batch_run_queued",
+        extra={
+            "batch_id": str(batch_id),
+            "merchant_id": str(payload.merchant_id),
+            "n_cases": len(cases),
+            "background": payload.background,
+            "instant": payload.instant,
+        },
+    )
     if payload.background:
         # The seed rows are committed above, so the pipeline runs entirely
         # outside the request; /batches/{id}/progress reports on it. A new
@@ -118,6 +130,7 @@ def trigger_batch_run(
     run.phase = "complete"
     run.summary = summary or {}
     db.commit()
+    logger.info("batch_run_complete", extra={"batch_id": str(batch_id), "phase": "complete"})
 
     return RunBatchResponse(
         batch_id=batch_id,
@@ -146,6 +159,7 @@ def _execute_background_batch(batch_id: uuid.UUID, case_ids: list[uuid.UUID], in
             run.phase = "complete"
             run.summary = summary or {}
             db.commit()
+        logger.info("batch_run_complete", extra={"batch_id": str(batch_id), "phase": "complete"})
     except Exception as exc:  # noqa: BLE001 - surfaced via the batch row
         db.rollback()
         run = db.get(BatchRun, batch_id)
@@ -153,6 +167,7 @@ def _execute_background_batch(batch_id: uuid.UUID, case_ids: list[uuid.UUID], in
             run.phase = "failed"
             run.error = f"{type(exc).__name__}: {exc}"[:1000]
             db.commit()
+        logger.exception("batch_run_failed", extra={"batch_id": str(batch_id), "phase": "failed"})
     finally:
         db.close()
 

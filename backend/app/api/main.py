@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -13,7 +13,10 @@ from app.api.tickets import router as tickets_router
 from app.api.webhooks import router as webhooks_router
 from app.config import settings
 from app.db.session import SessionLocal, get_db
+from app.logging_config import configure_logging, new_request_id, request_id_ctx
 from app.simulation.merchants import seed_merchants
+
+configure_logging()
 
 
 @asynccontextmanager
@@ -40,6 +43,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Every log line emitted while handling a request carries this id
+    (JsonFormatter reads it off the contextvar), and it's echoed back on
+    the response so a client/log aggregator can correlate the two sides.
+    Reuses an inbound X-Request-ID if the caller (or a load balancer)
+    already set one, rather than always minting a new one.
+    """
+    request_id = request.headers.get("X-Request-ID") or new_request_id()
+    token = request_id_ctx.set(request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_ctx.reset(token)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 app.include_router(batches_router)
 app.include_router(cases_router)
