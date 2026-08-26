@@ -1,6 +1,7 @@
 """Demo tenants. Idempotent seeding (by slug) so it's safe to call on
 every app startup / test run without creating duplicates.
 """
+import secrets
 import uuid
 
 from sqlalchemy import select
@@ -21,7 +22,10 @@ def seed_merchants(db: Session) -> list[Merchant]:
     for spec in DEMO_MERCHANTS:
         merchant = existing.get(spec["slug"])
         if merchant is None:
-            merchant = Merchant(id=uuid.uuid4(), name=spec["name"], slug=spec["slug"])
+            # Generated even though REQUIRE_MERCHANT_API_KEY defaults off -
+            # so a demo can turn auth on later without a backfill step, and
+            # scripts/show_merchant_api_keys.py always has something to show.
+            merchant = Merchant(id=uuid.uuid4(), name=spec["name"], slug=spec["slug"], api_key=secrets.token_hex(16))
             db.add(merchant)
         created_or_existing.append(merchant)
     db.commit()

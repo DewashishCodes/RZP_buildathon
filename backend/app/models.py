@@ -27,6 +27,10 @@ class Merchant(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100))
     slug: Mapped[str] = mapped_column(String(50), unique=True)
+    # Opt-in auth (app/api/auth.py, REQUIRE_MERCHANT_API_KEY): checked
+    # against X-API-Key only when that setting is on. Nullable/unique so
+    # merchants seeded before this feature existed don't need a backfill.
+    api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
 
     cases: Mapped[list["Case"]] = relationship(back_populates="merchant")
 

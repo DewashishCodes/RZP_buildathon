@@ -1,10 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.auth import verify_merchant_api_key
 from app.audit.rollup import batch_summary, guardrail_interventions, list_batches, recovery_curve
 from app.db.session import SessionLocal, get_db
 from app.execution.runner import TERMINAL_STATUSES, run_batch
@@ -41,7 +42,14 @@ def _find_by_idempotency_key(db: Session, merchant_id: uuid.UUID, idempotency_ke
 
 
 @router.post("/run", response_model=RunBatchResponse)
-def trigger_batch_run(payload: RunBatchRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def trigger_batch_run(
+    payload: RunBatchRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None),
+):
+    verify_merchant_api_key(db, payload.merchant_id, x_api_key)
+
     if payload.idempotency_key:
         existing = _find_by_idempotency_key(db, payload.merchant_id, payload.idempotency_key)
         if existing is not None:
