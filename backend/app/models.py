@@ -51,9 +51,12 @@ class Case(Base):
     customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id"))
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     currency: Mapped[str] = mapped_column(String(3), default="INR")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    # Server-side default (like AuditEvent/Ticket below) rather than a
+    # Python-side datetime.utcnow - that wrote naive datetimes into
+    # timezone=True columns and is deprecated since Python 3.12.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="open")
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
     raw_failure_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     root_cause: Mapped[str | None] = mapped_column(String(50), nullable=True)
     outcome: Mapped[str] = mapped_column(String(20), default="pending")
@@ -82,8 +85,11 @@ class Attempt(Base):
     __tablename__ = "attempts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"))
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    # Indexed: every timeline read filters attempts by case_id.
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"), index=True)
+    # Same server-side-default reasoning as Case.created_at above; callers
+    # that care about the simulated clock set this explicitly anyway.
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     channel: Mapped[str] = mapped_column(String(30))
     action: Mapped[str] = mapped_column(String(30))
     compliance_check: Mapped[dict] = mapped_column(JSONB)
@@ -98,7 +104,9 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"))
+    # Indexed (with event_type): this is the highest-volume table and the
+    # case drill-down + stopping-rule rollup both filter on these columns.
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.id"), index=True)
     attempt_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("attempts.id"), nullable=True)
     # Server-side clock_timestamp() (not Python-side datetime.utcnow()):
     # several AuditEvents are routinely created within the same flush
@@ -107,7 +115,7 @@ class AuditEvent(Base):
     # byte-identical timestamps for them, which breaks chronological
     # ordering. clock_timestamp() is evaluated per row by Postgres itself.
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
-    event_type: Mapped[str] = mapped_column(String(30))
+    event_type: Mapped[str] = mapped_column(String(30), index=True)
     actor: Mapped[str] = mapped_column(String(10))
     payload: Mapped[dict] = mapped_column(JSONB)
 
@@ -135,3 +143,28 @@ class Ticket(Base):
     reason: Mapped[str] = mapped_column(String(500))
 
     case: Mapped["Case"] = relationship()
+
+
+class BatchRun(Base):
+    """Lifecycle tracking for one POST /batches/run invocation.
+
+    Exists so the pipeline can run as a background task: the API returns
+    the batch_id immediately, the frontend polls /batches/{id}/progress,
+    and this row carries the authoritative phase plus the final summary
+    once the pipeline finishes. Batches created before this table existed
+    have no row here - progress for them derives purely from case statuses
+    (see app/api/batches.py).
+    """
+
+    __tablename__ = "batch_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    merchant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("merchants.id"), nullable=True)
+    requested_cases: Mapped[int] = mapped_column(default=0)
+    # queued -> running -> complete | failed
+    phase: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # The batch-scoped rollup (app/audit/rollup.batch_summary) stored once
+    # the pipeline completes, so late dashboard reads don't recompute it.
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
