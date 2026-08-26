@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MerchantOut(BaseModel):
@@ -15,12 +15,20 @@ class MerchantOut(BaseModel):
 
 class RunBatchRequest(BaseModel):
     merchant_id: uuid.UUID
-    n_cases: int = 200
+    # Capped server-side: each case fans out to several real Gemini calls,
+    # and the pipeline runs synchronously - an uncapped value let one
+    # request request 100k cases. (The /run UI already caps at 500; this
+    # makes the API stop trusting it.)
+    n_cases: int = Field(default=200, ge=1, le=500)
     seed: int | None = None
     # False leaves each case's first non-terminal round scheduled
     # (Case.next_action_at) instead of resolving it fully in this call -
     # see app/execution/runner.py and POST /jobs/run-due.
     instant: bool = True
+    # True seeds the batch, returns immediately, and runs the pipeline as a
+    # background task - poll GET /batches/{id}/progress. The response's
+    # summary is empty in this mode.
+    background: bool = False
 
 
 class RunBatchResponse(BaseModel):
@@ -28,6 +36,29 @@ class RunBatchResponse(BaseModel):
     n_customers: int
     n_cases: int
     summary: dict
+
+
+class BatchListItem(BaseModel):
+    batch_id: str
+    phase: str
+    created_at: datetime | None
+    total_cases: int
+    total_at_risk: float
+    total_recovered: float
+    recovery_rate: float
+
+
+class BatchProgressResponse(BaseModel):
+    batch_id: str
+    # queued | running | complete | failed (complete also for legacy
+    # synchronous batches with no batch_runs row).
+    phase: str
+    total_cases: int
+    resolved_cases: int
+    recovered_cases: int
+    recovered_amount: float
+    at_risk_amount: float
+    error: str | None = None
 
 
 class RootCauseBreakdown(BaseModel):
