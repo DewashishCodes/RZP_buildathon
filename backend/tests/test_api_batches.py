@@ -85,3 +85,85 @@ def test_run_batch_non_instant_leaves_cases_scheduled(monkeypatch):
     # single retry_now attempt to a terminal state this fast, so at least
     # some must still be "recovering" with a scheduled next_action_at.
     assert any(c["status"] == "recovering" and c["next_action_at"] is not None for c in cases)
+
+
+def test_background_batch_completes_and_progress_tracks_it(monkeypatch):
+    """background=true returns immediately; the TestClient runs the
+    BackgroundTask before the POST call returns, so progress is already
+    'complete' here - this pins the wiring (row created, phase flipped,
+    counts derived from cases) rather than real-world timing."""
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+    n_cases = 4
+
+    resp = client.post(
+        "/batches/run",
+        json={"merchant_id": merchant_id, "n_cases": n_cases, "seed": 9, "background": True},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["n_cases"] == n_cases + N_GUARANTEED
+    assert data["summary"] == {}  # empty in background mode - poll for it
+
+    progress = client.get(f"/batches/{data['batch_id']}/progress")
+    assert progress.status_code == 200
+    p = progress.json()
+    assert p["phase"] == "complete"
+    assert p["total_cases"] == n_cases + N_GUARANTEED
+    assert p["resolved_cases"] == p["total_cases"]
+    assert p["at_risk_amount"] > 0
+
+    # The completed rollup is stored on the batch row and matches the
+    # summary endpoint.
+    summary = client.get(f"/batches/{data['batch_id']}/summary").json()
+    db = SessionLocal()
+    try:
+        from app.models import BatchRun
+
+        run = db.get(BatchRun, __import__("uuid").UUID(data["batch_id"]))
+        assert run is not None and run.phase == "complete"
+        assert run.summary is not None
+        assert run.summary["total_cases"] == summary["total_cases"]
+    finally:
+        db.close()
+
+
+def test_background_batch_failure_recorded_not_raised(monkeypatch):
+    from app.api import batches as batches_module
+
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("pipeline blew up")
+
+    monkeypatch.setattr(batches_module, "run_batch", explode)
+
+    resp = client.post(
+        "/batches/run", json={"merchant_id": merchant_id, "n_cases": 2, "seed": 10, "background": True}
+    )
+    assert resp.status_code == 200
+    batch_id = resp.json()["batch_id"]
+
+    progress = client.get(f"/batches/{batch_id}/progress").json()
+    assert progress["phase"] == "failed"
+    assert "pipeline blew up" in progress["error"]
+
+    db = SessionLocal()
+    try:
+        db.expire_all()  # _execute_background_batch wrote via its own session
+        from app.models import BatchRun
+
+        run = db.get(BatchRun, __import__("uuid").UUID(batch_id))
+        assert run is not None and run.phase == "failed"
+        assert "pipeline blew up" in run.error
+    finally:
+        db.close()
+
+
+def test_batch_progress_404_for_unknown_or_empty_batch():
+    import uuid
+
+    resp = client.get(f"/batches/{uuid.uuid4()}/progress")
+    assert resp.status_code == 404
