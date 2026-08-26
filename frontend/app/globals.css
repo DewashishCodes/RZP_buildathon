@@ -28,6 +28,24 @@
   --status-critical-bg: rgba(208, 59, 59, 0.12);
   --status-neutral: #898781;
   --status-neutral-bg: rgba(137, 135, 129, 0.12);
+
+  /* Landing-page-only color grammar (components/landing/*): two accents
+     that each mean one specific thing, used consistently rather than
+     picked per-section. Verdigris = retrospective face (diagnosis, at-
+     risk, a proposal before it's checked). Copper = prospective face
+     (the guardrail-approved action, recovered money, what actually
+     happens). Never used interchangeably - a designer/dev extending this
+     page should be able to infer which one a new element needs from what
+     it represents, not from what looks nice next to it. */
+  --verdigris: #8fb8a3;
+  --verdigris-bright: #b3d4c3;
+  --verdigris-fill: rgba(143, 184, 163, 0.12);
+  --verdigris-border: rgba(143, 184, 163, 0.3);
+  --copper: #cf9361;
+  --copper-bright: #e3b489;
+  --copper-fill: rgba(207, 147, 97, 0.12);
+  --copper-border: rgba(207, 147, 97, 0.32);
+  --landing-text: #edeae3;
 }
 
 @theme inline {
@@ -52,6 +70,22 @@
   --color-status-neutral-bg: var(--status-neutral-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-verdigris: var(--verdigris);
+  --color-verdigris-bright: var(--verdigris-bright);
+  --color-verdigris-fill: var(--verdigris-fill);
+  --color-verdigris-border: var(--verdigris-border);
+  --color-copper: var(--copper);
+  --color-copper-bright: var(--copper-bright);
+  --color-copper-fill: var(--copper-fill);
+  --color-copper-border: var(--copper-border);
+  --color-landing-text: var(--landing-text);
+  /* next/font vars for these two are only ever set on the landing page's
+     own wrapper (lib/fonts.ts + components/landing/hero.tsx) - the
+     font-display/font-numeric utilities simply have nothing to resolve
+     outside that subtree, same as any other unused Tailwind utility. */
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-numeric: var(--font-jetbrains-mono), ui-monospace, monospace;
 }
 
 body {
@@ -122,6 +156,28 @@ body {
   animation: signal-travel 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Gate-swing: the guardrail-proof section's central interaction
+   (components/landing/gate-card.tsx). The "proposal" face sits in front,
+   hinged at the left edge; on reveal it swings away like a door,
+   uncovering the static "override" face that was behind it the whole
+   time. Without JS or under reduced-motion, .gate-front simply isn't
+   rendered open - see the component for the no-JS fallback markup. */
+.gate-scene {
+  perspective: 1600px;
+}
+
+.gate-front {
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  transition: transform 1.1s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.6s ease-out 0.5s;
+}
+
+.gate-front.gate-open {
+  transform: rotateY(-108deg);
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal-init {
     opacity: 1;
@@ -133,5 +189,12 @@ body {
   .signal-dot {
     animation: none;
     display: none;
+  }
+  .gate-front {
+    transition: opacity 0.3s ease-out;
+  }
+  .gate-front.gate-open {
+    transform: none;
+    opacity: 0;
   }
 }
