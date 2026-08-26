@@ -13,10 +13,8 @@ import {
   XCircleIcon,
 } from "@/components/icons";
 import { StatTile } from "@/components/stat-tile";
-
-function formatRs(n: number) {
-  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-}
+import { CountUp } from "@/components/count-up";
+import { Reveal } from "@/components/reveal";
 
 function shortId(id: string) {
   return id.slice(0, 8);
@@ -69,11 +67,19 @@ async function ProofStrip() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatTile label="₹ at risk" value={formatRs(batch.total_at_risk)} />
-        <StatTile label="₹ recovered" value={formatRs(batch.total_recovered)} accent="good" />
-        <StatTile label="Recovery rate" value={`${(batch.recovery_rate * 100).toFixed(1)}%`} accent="accent" />
-      </div>
+      <Reveal className="grid gap-4 sm:grid-cols-3">
+        <StatTile label="₹ at risk" value={<CountUp value={batch.total_at_risk} prefix="₹" />} />
+        <StatTile
+          label="₹ recovered"
+          value={<CountUp value={batch.total_recovered} prefix="₹" />}
+          accent="good"
+        />
+        <StatTile
+          label="Recovery rate"
+          value={<CountUp value={batch.recovery_rate * 100} suffix="%" decimals={1} />}
+          accent="accent"
+        />
+      </Reveal>
       <Link
         href={`/dashboard?batch=${batch.batch_id}`}
         className="inline-flex w-fit items-center gap-1.5 text-xs text-text-muted transition-colors hover:text-text-secondary"
@@ -100,19 +106,23 @@ const PIPELINE_STEPS = [
 
 function PipelineStep({ step, index, isLast }: { step: (typeof PIPELINE_STEPS)[number]; index: number; isLast: boolean }) {
   return (
-    <div className="relative flex flex-1 flex-col gap-3 rounded-xl border border-border bg-surface-1 p-5">
-      <div className="flex items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
-          <step.icon className="h-4 w-4" />
-        </span>
-        <span className="text-xs font-medium text-text-muted">{index + 1}</span>
+    <Reveal delayMs={index * 90} className="relative flex flex-1">
+      <div className="group flex flex-1 flex-col gap-3 rounded-xl border border-border bg-surface-1 p-5 transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:border-border-strong">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent transition-transform duration-150 ease-out group-hover:scale-110">
+            <step.icon className="h-4 w-4" />
+          </span>
+          <span className="text-xs font-medium text-text-muted">{index + 1}</span>
+        </div>
+        <h3 className="text-sm font-semibold text-text-primary">{step.title}</h3>
+        <p className="text-xs leading-relaxed text-text-muted">{step.body}</p>
       </div>
-      <h3 className="text-sm font-semibold text-text-primary">{step.title}</h3>
-      <p className="text-xs leading-relaxed text-text-muted">{step.body}</p>
       {!isLast && (
-        <ArrowRightIcon className="absolute top-1/2 -right-[22px] hidden h-3.5 w-3.5 -translate-y-1/2 text-border-strong md:block" />
+        <div className="signal-line absolute top-1/2 -right-4 hidden h-px w-4 -translate-y-1/2 bg-border-strong md:block">
+          <span className="signal-dot" style={{ animationDelay: `${index * 0.3}s` }} />
+        </div>
       )}
-    </div>
+    </Reveal>
   );
 }
 
@@ -130,7 +140,7 @@ function GuardrailExample({
   outcome: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-surface-1 p-5">
+    <div className="rounded-xl border border-border bg-surface-1 p-5 transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_0_0_1px_var(--accent)_inset]">
       <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-text-muted">
         <Icon className="h-3.5 w-3.5" />
         {kicker}
@@ -167,9 +177,14 @@ export default async function Home() {
         <span className="mx-auto w-fit rounded-full border border-border bg-surface-1 px-3 py-1 text-xs font-medium text-text-secondary sm:mx-0">
           Razorpay Buildathon · Track 03
         </span>
-        <h1 className="text-4xl font-semibold tracking-tight text-text-primary">
-          Janus
-          <span className="ml-3 align-middle text-base font-medium text-text-muted">AI Revenue Recovery Agent</span>
+        <h1 className="relative text-5xl font-bold tracking-tighter text-text-primary sm:text-6xl">
+          <span className="relative">
+            Janus
+            <span className="absolute -inset-x-4 -inset-y-2 -z-10 rounded-full bg-accent/20 blur-2xl" aria-hidden="true" />
+          </span>
+          <span className="ml-3 align-middle text-base font-medium tracking-normal text-text-muted">
+            AI Revenue Recovery Agent
+          </span>
         </h1>
         <p className="max-w-xl text-base leading-relaxed text-text-secondary sm:max-w-none">
           Named for the god of thresholds: detects revenue at risk across payment/mandate
@@ -180,14 +195,14 @@ export default async function Home() {
         <div className="mt-2 flex justify-center gap-3 sm:justify-start">
           <Link
             href="/run?demo=1"
-            className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-strong"
+            className="group inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 ease-out hover:scale-[1.03] hover:bg-accent-strong hover:shadow-[0_0_20px_-4px_var(--accent)]"
           >
             Run demo batch
-            <ArrowRightIcon className="h-3.5 w-3.5" />
+            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
           </Link>
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:border-border-strong hover:bg-surface-1"
+            className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-text-primary transition-all duration-150 ease-out hover:scale-[1.03] hover:border-border-strong hover:bg-surface-1"
           >
             View dashboard
           </Link>
@@ -223,20 +238,24 @@ export default async function Home() {
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <GuardrailExample
-            icon={AlertTriangleIcon}
-            kicker="Stopping rule"
-            proposed="retry_now"
-            overrideLabel="Guardrail: fraud_or_dispute_auto_escalate"
-            outcome="Escalated straight to a human - no further automated contact attempted, no exceptions."
-          />
-          <GuardrailExample
-            icon={ShieldIcon}
-            kicker="Compliance substitution"
-            proposed="voice_call"
-            overrideLabel="DND rule substituted: send_reminder"
-            outcome="A do-not-disturb customer never receives the call the model wanted to make."
-          />
+          <Reveal delayMs={0}>
+            <GuardrailExample
+              icon={AlertTriangleIcon}
+              kicker="Stopping rule"
+              proposed="retry_now"
+              overrideLabel="Guardrail: fraud_or_dispute_auto_escalate"
+              outcome="Escalated straight to a human - no further automated contact attempted, no exceptions."
+            />
+          </Reveal>
+          <Reveal delayMs={120}>
+            <GuardrailExample
+              icon={ShieldIcon}
+              kicker="Compliance substitution"
+              proposed="voice_call"
+              overrideLabel="DND rule substituted: send_reminder"
+              outcome="A do-not-disturb customer never receives the call the model wanted to make."
+            />
+          </Reveal>
         </div>
       </section>
 
@@ -246,21 +265,26 @@ export default async function Home() {
           <h2 className="text-lg font-medium text-text-primary">One case, an escalating ladder</h2>
           <p className="mt-1 text-sm text-text-secondary">Contact intensity rises only as far as the case demands.</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {CHANNEL_STEPS.map((step) => (
-            <div key={step.label} className="flex flex-col items-center gap-2 rounded-xl border border-border bg-surface-1 p-5 text-center">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                <step.icon className="h-4 w-4" />
-              </span>
-              <p className="text-xs leading-relaxed text-text-secondary">{step.label}</p>
-            </div>
+        <div className="relative grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="signal-line absolute top-9 right-[12.5%] left-[12.5%] hidden h-px bg-border-strong sm:block">
+            <span className="signal-dot" />
+          </div>
+          {CHANNEL_STEPS.map((step, i) => (
+            <Reveal key={step.label} delayMs={i * 90}>
+              <div className="group flex flex-col items-center gap-2 rounded-xl border border-border bg-surface-1 p-5 text-center transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:border-border-strong">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent transition-transform duration-150 ease-out group-hover:scale-110">
+                  <step.icon className="h-4 w-4" />
+                </span>
+                <p className="text-xs leading-relaxed text-text-secondary">{step.label}</p>
+              </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* Breadth */}
       <section className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-border bg-surface-1 p-5">
+        <Reveal delayMs={0} className="rounded-xl border border-border bg-surface-1 p-5">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
               <XCircleIcon className="h-4 w-4" />
@@ -271,8 +295,8 @@ export default async function Home() {
             Failed card/UPI debits and revoked subscription mandates, root-caused down to
             insufficient funds, expired cards, issuer declines, bank timeouts, and more.
           </p>
-        </div>
-        <div className="rounded-xl border border-border bg-surface-1 p-5">
+        </Reveal>
+        <Reveal delayMs={120} className="rounded-xl border border-border bg-surface-1 p-5">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
               <MailIcon className="h-4 w-4" />
@@ -283,7 +307,7 @@ export default async function Home() {
             Overdue invoices bucketed by how late they are, with disputes routed straight to
             human escalation instead of an automated nudge.
           </p>
-        </div>
+        </Reveal>
       </section>
 
       {/* Engineering credibility */}
@@ -301,14 +325,14 @@ export default async function Home() {
         <div className="flex gap-3">
           <Link
             href="/run?demo=1"
-            className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-strong"
+            className="group inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 ease-out hover:scale-[1.03] hover:bg-accent-strong hover:shadow-[0_0_20px_-4px_var(--accent)]"
           >
             Run demo batch
-            <ArrowRightIcon className="h-3.5 w-3.5" />
+            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
           </Link>
           <Link
             href="/history"
-            className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:border-border-strong hover:bg-surface-1"
+            className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-text-primary transition-all duration-150 ease-out hover:scale-[1.03] hover:border-border-strong hover:bg-surface-1"
           >
             Browse history
           </Link>

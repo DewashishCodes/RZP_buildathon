@@ -63,3 +63,75 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* Kinetic motion primitives for the landing page (components/reveal.tsx,
+   components/count-up.tsx, the pipeline/channel-ladder connectors in
+   app/page.tsx). Kept separate from the rest of the app's static design
+   system - nothing outside the landing page opts into these. */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal-init {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.reveal-visible {
+  animation: reveal-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes signal-travel {
+  0% {
+    left: -6px;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+.signal-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.signal-dot {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 9999px;
+  background: var(--accent);
+  box-shadow: 0 0 6px 1px var(--accent);
+  animation: signal-travel 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-init {
+    opacity: 1;
+    transform: none;
+  }
+  .reveal-visible {
+    animation: none;
+  }
+  .signal-dot {
+    animation: none;
+    display: none;
+  }
+}

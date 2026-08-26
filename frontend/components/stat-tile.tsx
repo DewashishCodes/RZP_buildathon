@@ -5,7 +5,7 @@ export function StatTile({
   hint,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   accent?: "good" | "accent" | "warning" | "critical" | "none";
   hint?: string;
 }) {
