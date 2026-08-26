@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.detection.service import run_detection_on_batch
 from app.execution.connectors import execute_contact_action, execute_voice_call
+from app.execution.providers import ChannelProvider, default_provider
 from app.execution.tickets import create_ticket_for_case
 from app.models import Attempt, AuditEvent, Case
 from app.policy.channels import determine_channel
@@ -49,6 +50,7 @@ def run_batch(
     now: datetime | None = None,
     case_ids: list | None = None,
     instant: bool = True,
+    provider: ChannelProvider | None = None,
 ) -> dict:
     """Runs the full pipeline. If case_ids is given, scopes detection and
     execution to exactly those cases (used by scenario-specific demo
@@ -56,6 +58,7 @@ def run_batch(
     otherwise processes every open case of the in-scope types.
     """
     now = now or datetime.now(timezone.utc)
+    provider = provider or default_provider
 
     run_detection_on_batch(db, llm_client=llm_client, now=now, case_ids=case_ids)
 
@@ -73,15 +76,17 @@ def run_batch(
     cases = db.execute(stmt).scalars().all()
     for case in cases:
         if instant:
-            _run_case_to_terminal(db, case, llm_client=llm_client, start_now=now)
+            _run_case_to_terminal(db, case, llm_client=llm_client, start_now=now, provider=provider)
         else:
-            _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now)
+            _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now, provider=provider)
 
     db.commit()
     return summarize(db, case_ids=[c.id for c in cases])
 
 
-def process_due_cases(db: Session, llm_client=None, now: datetime | None = None, merchant_id=None) -> dict:
+def process_due_cases(
+    db: Session, llm_client=None, now: datetime | None = None, merchant_id=None, provider: ChannelProvider | None = None
+) -> dict:
     """Advances every case currently waiting on a deferred round
     (Case.next_action_at is set). Mirrors what a real cron/job queue
     would do on schedule; here it's invoked manually (POST /jobs/run-due)
@@ -95,6 +100,7 @@ def process_due_cases(db: Session, llm_client=None, now: datetime | None = None,
     up whatever the first one hasn't claimed yet instead of stalling.
     """
     now = now or datetime.now(timezone.utc)
+    provider = provider or default_provider
 
     stmt = (
         select(Case)
@@ -112,7 +118,7 @@ def process_due_cases(db: Session, llm_client=None, now: datetime | None = None,
     reached_terminal = 0
     rescheduled = 0
     for case in cases:
-        was_terminal = _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now)
+        was_terminal = _run_case_one_deferred_round(db, case, llm_client=llm_client, now=now, provider=provider)
         if was_terminal:
             reached_terminal += 1
         else:
@@ -122,7 +128,7 @@ def process_due_cases(db: Session, llm_client=None, now: datetime | None = None,
     return {"processed": len(cases), "reached_terminal": reached_terminal, "rescheduled": rescheduled}
 
 
-def _run_case_one_deferred_round(db: Session, case: Case, llm_client, now: datetime) -> bool:
+def _run_case_one_deferred_round(db: Session, case: Case, llm_client, now: datetime, provider: ChannelProvider) -> bool:
     """Runs exactly one round. Returns True if the case reached a
     terminal state, False if it was rescheduled (next_action_at set)."""
     db.refresh(case)
@@ -132,7 +138,7 @@ def _run_case_one_deferred_round(db: Session, case: Case, llm_client, now: datet
         db.commit()
         return True
 
-    result = _run_case_round(db, case, llm_client=llm_client, sim_now=now)
+    result = _run_case_round(db, case, llm_client=llm_client, sim_now=now, provider=provider)
 
     if result["terminal"]:
         case.next_action_at = None
@@ -144,7 +150,7 @@ def _run_case_one_deferred_round(db: Session, case: Case, llm_client, now: datet
     return result["terminal"]
 
 
-def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: datetime) -> None:
+def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: datetime, provider: ChannelProvider) -> None:
     sim_now = start_now
 
     for _ in range(MAX_ROUNDS_PER_CASE):
@@ -152,7 +158,7 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
         if case.status in TERMINAL_STATUSES:
             return
 
-        result = _run_case_round(db, case, llm_client=llm_client, sim_now=sim_now)
+        result = _run_case_round(db, case, llm_client=llm_client, sim_now=sim_now, provider=provider)
         if result["terminal"]:
             return
         sim_now = result["next_sim_now"]
@@ -176,7 +182,7 @@ def _run_case_to_terminal(db: Session, case: Case, llm_client, start_now: dateti
     db.commit()
 
 
-def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> dict:
+def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime, provider: ChannelProvider) -> dict:
     """Runs exactly one decide -> execute round for a case already known
     to be non-terminal. Returns {"terminal": bool, "next_sim_now": datetime}
     (next_sim_now is only meaningful when terminal is False).
@@ -234,6 +240,10 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
         return {"terminal": True, "next_sim_now": None}
 
     channel = determine_channel(action, customer.preferred_channel)
+    # The dispatch seam: a real integration's SMS/voice/email/WhatsApp API
+    # call goes through ChannelProvider.send, independent of whether the
+    # hidden recoverability model's roll below says it succeeded.
+    receipt = provider.send(channel=channel, action=action, case_id=case.id, customer_id=customer.id) if channel else None
     if action == "voice_call":
         outcome = execute_voice_call(case, customer, now=sim_now, llm_client=llm_client)
     else:
@@ -258,7 +268,15 @@ def _run_case_round(db: Session, case: Case, llm_client, sim_now: datetime) -> d
             attempt_id=attempt.id,
             event_type="action_executed",
             actor="system",
-            payload={"action": action, "channel": channel},
+            payload={
+                "action": action,
+                "channel": channel,
+                "provider_receipt": (
+                    {"provider": receipt.provider, "receipt_id": receipt.receipt_id, "status": receipt.status}
+                    if receipt is not None
+                    else None
+                ),
+            },
         )
     )
     db.add(
