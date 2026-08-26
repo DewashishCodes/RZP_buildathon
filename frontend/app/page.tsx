@@ -1,4 +1,3 @@
-import { fraunces, jetbrainsMono } from "@/lib/fonts";
 import { Hero } from "@/components/landing/hero";
 import { ProofStrip } from "@/components/landing/proof-strip";
 import { Pipeline } from "@/components/landing/pipeline";
@@ -12,7 +11,7 @@ import { ThresholdDivider } from "@/components/landing/threshold-divider";
 
 export default function Home() {
   return (
-    <div className={`${fraunces.variable} ${jetbrainsMono.variable}`}>
+    <div>
       <Hero />
 
       <div className="mx-auto flex max-w-5xl flex-col gap-16 px-6 py-16">

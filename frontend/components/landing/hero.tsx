@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowRightIcon } from "@/components/icons";
+import { JanusMedallion } from "./janus-medallion";
 
 /**
  * Two soft glows - verdigris left, copper right - meet at a seam behind
@@ -22,10 +23,12 @@ export function Hero() {
         aria-hidden="true"
       />
 
-      <div className="relative mx-auto flex max-w-3xl flex-col items-center gap-6 px-6 py-24 text-center">
+      <div className="relative mx-auto flex max-w-3xl flex-col items-center gap-6 px-6 pt-16 pb-24 text-center">
         <span className="font-numeric w-fit rounded-full border border-border bg-surface-1 px-3 py-1 text-[11px] uppercase tracking-wider text-text-secondary">
           Razorpay Buildathon · Track 03
         </span>
+
+        <JanusMedallion />
 
         <h1 className="font-display text-6xl leading-none font-semibold text-landing-text sm:text-7xl">Janus</h1>
         <p className="text-sm text-text-muted">AI Revenue Recovery Agent</p>

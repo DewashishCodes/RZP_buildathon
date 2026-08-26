@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMerchant } from "./merchant-context";
@@ -38,14 +39,17 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-plane/80 backdrop-blur">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
+    <header
+      className="sticky top-0 z-20 border-b bg-plane/80 backdrop-blur"
+      style={{ borderImage: "linear-gradient(to right, var(--verdigris-border), var(--border), var(--copper-border)) 1" }}
+    >
+      <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-xs font-bold text-white">
-              J
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 ring-1 ring-border-strong">
+              <Image src="/janus-logo.png" alt="Janus" width={28} height={28} className="h-[85%] w-[85%] object-contain" />
             </span>
-            <span className="text-sm font-semibold tracking-tight text-text-primary">Janus</span>
+            <span className="font-display text-base font-medium tracking-tight text-text-primary">Janus</span>
           </Link>
           <div className="flex items-center gap-1">
             {LINKS.map((link) => {
