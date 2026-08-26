@@ -1,8 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getCaseTimeline, type AuditEvent } from "@/lib/api";
 import { EventTimeline } from "@/components/event-timeline";
 import { StatusBadge } from "@/components/status-badge";
 import { ArrowRightIcon, ChatIcon, ShieldIcon } from "@/components/icons";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const { case: c } = await getCaseTimeline(id);
+    const label = c.root_cause ?? c.type;
+    return { title: `Case · ${label} — AI Revenue Recovery Agent` };
+  } catch {
+    return { title: "Case not found — AI Revenue Recovery Agent" };
+  }
+}
 
 function formatRs(n: number) {
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;

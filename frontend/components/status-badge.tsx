@@ -20,7 +20,7 @@ export function StatusBadge({ status, className = "" }: { status: string; classN
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${config.color} ${config.bg} ${className}`}
     >
-      <Icon className="h-3 w-3" />
+      <Icon className="h-3 w-3" aria-hidden="true" />
       {config.label}
     </span>
   );
@@ -48,7 +48,7 @@ export function TicketStatusBadge({ status, className = "" }: { status: string; 
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${config.color} ${config.bg} ${className}`}
     >
-      <Icon className="h-3 w-3" />
+      <Icon className="h-3 w-3" aria-hidden="true" />
       {config.label}
     </span>
   );

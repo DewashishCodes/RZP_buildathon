@@ -99,8 +99,12 @@ export function ScheduledActionsPanel({ merchantId }: { merchantId: string }) {
                 <span className="text-xs text-text-muted">
                   next action: {c.next_action_at ? new Date(c.next_action_at).toLocaleString() : "—"}
                 </span>
-                <Link href={`/cases/${c.id}`} className="inline-flex items-center gap-1 text-text-muted hover:text-text-primary">
-                  <ArrowRightIcon className="h-3 w-3" />
+                <Link
+                  href={`/cases/${c.id}`}
+                  aria-label="View case details"
+                  className="inline-flex items-center gap-1 text-text-muted hover:text-text-primary"
+                >
+                  <ArrowRightIcon className="h-3 w-3" aria-hidden="true" />
                 </Link>
               </div>
             </div>

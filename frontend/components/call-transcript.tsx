@@ -103,9 +103,10 @@ export function CallTranscript({ transcript }: { transcript: string }) {
             if (playing) stop();
             setOpen(!open);
           }}
+          aria-expanded={open}
           className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary"
         >
-          <PhoneIcon className="h-3 w-3" />
+          <PhoneIcon className="h-3 w-3" aria-hidden="true" />
           {open ? "Hide call transcript" : "View call transcript"}
         </button>
         {open && supported && (
