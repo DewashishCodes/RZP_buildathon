@@ -1,14 +1,17 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api.batches import router as batches_router
 from app.api.cases import router as cases_router
 from app.api.jobs import router as jobs_router
 from app.api.merchants import router as merchants_router
 from app.api.tickets import router as tickets_router
-from app.db.session import SessionLocal
+from app.config import settings
+from app.db.session import SessionLocal, get_db
 from app.simulation.merchants import seed_merchants
 
 
@@ -45,5 +48,17 @@ app.include_router(jobs_router)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    """Not a static dict: pings Postgres and reports LLM config presence, so
+    a misconfigured environment surfaces here instead of as an opaque
+    mid-batch failure right before a demo."""
+    db_ok = True
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001 - health must report, not raise
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "db": "up" if db_ok else "down",
+        "gemini_configured": bool(settings.gemini_api_key),
+    }
