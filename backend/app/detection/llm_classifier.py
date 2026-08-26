@@ -1,8 +1,13 @@
 """Gemini-backed root-cause classifier for free-text/ambiguous failure
 messages that the deterministic rules (app/detection/rules.py) can't map.
+Identical failure messages recur constantly within a batch, so results for
+real (non-injected) client calls are memoized on the raw message - one
+batch of 200 cases typically contains far fewer distinct messages than
+cases, and this is the single cheapest LLM-cost win available.
 """
 import json
 import re
+from functools import lru_cache
 from typing import Any
 
 from google.genai import errors
@@ -28,6 +33,24 @@ FALLBACK_ROOT_CAUSE = "issuer_declined"
 
 
 def classify_by_llm(raw_failure_reason: str, client: Any = None) -> dict:
+    """Cached when called with the real singleton client (production path);
+    explicit clients (tests, demo scripts forcing specific responses) always
+    bypass the cache so injected responses can't cross-contaminate."""
+    if client is None:
+        return _classify_cached(raw_failure_reason)
+    return _classify_uncached(raw_failure_reason, client)
+
+
+@lru_cache(maxsize=2048)
+def _classify_cached(raw_failure_reason: str) -> dict:
+    return _classify_uncached(raw_failure_reason, None)
+
+
+def clear_classification_cache() -> None:
+    _classify_cached.cache_clear()
+
+
+def _classify_uncached(raw_failure_reason: str, client: Any) -> dict:
     client = client or get_client()
     prompt = PROMPT_TEMPLATE.format(
         message=raw_failure_reason,
