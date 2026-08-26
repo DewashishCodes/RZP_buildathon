@@ -604,6 +604,47 @@ notes below once those land.
   `GEMINI_API_KEY` is configured, so a misconfigured environment
   surfaces at the health check instead of mid-batch during a demo.
 
+## Real-world credibility (Track B)
+
+Done after Track C, in prep for the buildathon submission's "how does
+this touch the real world" questions.
+
+- **`POST /webhooks/razorpay`** (`app/api/webhooks.py`) — mock ingestion
+  that mirrors Razorpay's actual webhook scheme: `X-Razorpay-Signature`
+  is the HMAC-SHA256 hex digest of the raw body, keyed by
+  `RAZORPAY_WEBHOOK_SECRET` (empty by default, so the demo endpoint works
+  without provisioning a secret). `payment.captured` resolves the
+  referenced case (looked up via `payload.payment.entity.notes.case_id`);
+  `payment.failed` records a webhook `Attempt` without resolving it, same
+  as any other channel's failed attempt. This is independent of the
+  batch runner's simulated recoverability-model dice roll — the "how
+  does this touch real Razorpay" answer for the submission.
+- **Provider adapter interface** (`app/execution/providers.py`) —
+  `ChannelProvider` is the seam where a real SMS/voice/email/WhatsApp API
+  call would actually happen, separate from *whether* an attempt
+  succeeds (still decided by the hidden recoverability model).
+  `LoggingChannelProvider` is the only implementation: logs a structured
+  "sent" record and returns a synthetic receipt id. `run_batch`/
+  `process_due_cases` take an optional `provider` (same injection
+  pattern as `llm_client`); the runner records the receipt on the
+  `action_executed` AuditEvent.
+- **Opt-in per-merchant API-key auth** (`app/api/auth.py`) —
+  `REQUIRE_MERCHANT_API_KEY` defaults to false (this project's existing
+  no-auth-wall stance for frictionless judge/demo access). When on,
+  `POST /batches/run` and merchant-scoped `POST /jobs/run-due` check
+  `X-API-Key` against `Merchant.api_key`, generated for every seeded
+  merchant regardless of the setting. Never returned by `GET /merchants`
+  (an open endpoint) — `scripts/show_merchant_api_keys.py` prints it for
+  local testing.
+- **Structured JSON logging + request IDs** (`app/logging_config.py`) —
+  every app-level log line is one JSON object (timestamp, level, logger,
+  message, plus any `extra={...}` fields); a `request_id_middleware`
+  mints or reuses an inbound `X-Request-ID`, stores it on a contextvar
+  the formatter reads, and echoes it on the response header. Covers this
+  app's own business-event logging (batch runs, webhook events, provider
+  dispatches) — uvicorn's own access-log lines keep their default format
+  since uvicorn wires its own loggers separately from the root logger.
+
 ## Phase status
 
 | Phase | Description | Status |
