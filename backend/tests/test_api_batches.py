@@ -47,6 +47,49 @@ def test_run_batch_returns_batch_id_and_summary(monkeypatch):
     assert "summary" in data
 
 
+def test_run_batch_idempotency_key_returns_same_batch(monkeypatch):
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+
+    payload = {"merchant_id": merchant_id, "n_cases": 5, "seed": 3, "idempotency_key": "retry-abc-123"}
+    first = client.post("/batches/run", json=payload)
+    second = client.post("/batches/run", json=payload)
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["batch_id"] == second.json()["batch_id"]
+    assert first.json()["n_cases"] == second.json()["n_cases"]
+
+    # only one batch's worth of cases actually exists - the retry didn't
+    # seed a duplicate set alongside the original.
+    cases = client.get("/cases", params={"batch_id": first.json()["batch_id"]}).json()
+    assert len(cases) == first.json()["n_cases"]
+
+
+def test_run_batch_idempotency_key_scoped_per_merchant(monkeypatch):
+    """The same key for a different merchant must not collide - it's a
+    dedup key against accidental retries, not a global request id."""
+    _patch_gemini(monkeypatch)
+    merchant_id = _demo_merchant_id()
+    from app.simulation.merchants import seed_merchants
+
+    db = SessionLocal()
+    try:
+        other_merchant_id = str(
+            next(m for m in seed_merchants(db) if str(m.id) != merchant_id).id
+        )
+    finally:
+        db.close()
+
+    key = "shared-key"
+    first = client.post("/batches/run", json={"merchant_id": merchant_id, "n_cases": 3, "seed": 4, "idempotency_key": key})
+    second = client.post(
+        "/batches/run", json={"merchant_id": other_merchant_id, "n_cases": 3, "seed": 5, "idempotency_key": key}
+    )
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["batch_id"] != second.json()["batch_id"]
+
+
 def test_get_batch_summary_after_run(monkeypatch):
     _patch_gemini(monkeypatch)
     merchant_id = _demo_merchant_id()

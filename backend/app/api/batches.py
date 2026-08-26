@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit.rollup import batch_summary, guardrail_interventions, list_batches, recovery_curve
@@ -27,8 +28,25 @@ def list_batch_runs(merchant_id: uuid.UUID | None = None, db: Session = Depends(
     return list_batches(db, merchant_id=merchant_id)
 
 
+def _idempotent_replay_response(db: Session, run: BatchRun) -> RunBatchResponse:
+    n_cases = db.scalar(select(func.count()).select_from(Case).where(Case.batch_id == run.id)) or 0
+    n_customers = db.scalar(select(func.count(func.distinct(Case.customer_id))).where(Case.batch_id == run.id)) or 0
+    return RunBatchResponse(batch_id=run.id, n_customers=n_customers, n_cases=n_cases, summary=run.summary or {})
+
+
+def _find_by_idempotency_key(db: Session, merchant_id: uuid.UUID, idempotency_key: str) -> BatchRun | None:
+    return db.scalar(
+        select(BatchRun).where(BatchRun.merchant_id == merchant_id, BatchRun.idempotency_key == idempotency_key)
+    )
+
+
 @router.post("/run", response_model=RunBatchResponse)
 def trigger_batch_run(payload: RunBatchRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    if payload.idempotency_key:
+        existing = _find_by_idempotency_key(db, payload.merchant_id, payload.idempotency_key)
+        if existing is not None:
+            return _idempotent_replay_response(db, existing)
+
     batch_id = uuid.uuid4()
     customers, cases = generate_batch(n_cases=payload.n_cases, seed=payload.seed)
     # Hand-crafted scenario cases (PRD §16: guardrail-fired, compliance-
@@ -41,15 +59,37 @@ def trigger_batch_run(payload: RunBatchRequest, background_tasks: BackgroundTask
         case["batch_id"] = batch_id
         case["merchant_id"] = payload.merchant_id
 
-    if payload.background:
-        db.bulk_insert_mappings(
-            BatchRun, [{"id": batch_id, "merchant_id": payload.merchant_id, "requested_cases": len(cases), "phase": "queued"}]
-        )
+    # Always tracked (not just background=True): this is what an
+    # idempotency_key retry looks up, and unifies phase reporting across
+    # both modes.
+    db.bulk_insert_mappings(
+        BatchRun,
+        [
+            {
+                "id": batch_id,
+                "merchant_id": payload.merchant_id,
+                "requested_cases": len(cases),
+                "phase": "queued",
+                "idempotency_key": payload.idempotency_key,
+            }
+        ],
+    )
     db.bulk_insert_mappings(Customer, customers)
     db.bulk_insert_mappings(Case, cases)
     if g_attempts:
         db.bulk_insert_mappings(Attempt, g_attempts)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost a race against a concurrent request carrying the same
+        # (merchant_id, idempotency_key) - discard this attempt's rows and
+        # return the winner's batch instead of erroring or duplicating.
+        db.rollback()
+        if payload.idempotency_key:
+            existing = _find_by_idempotency_key(db, payload.merchant_id, payload.idempotency_key)
+            if existing is not None:
+                return _idempotent_replay_response(db, existing)
+        raise
 
     case_ids = [case["id"] for case in cases]
     if payload.background:
@@ -59,8 +99,18 @@ def trigger_batch_run(payload: RunBatchRequest, background_tasks: BackgroundTask
         background_tasks.add_task(_execute_background_batch, batch_id, case_ids, payload.instant)
         return RunBatchResponse(batch_id=batch_id, n_customers=len(customers), n_cases=len(cases), summary={})
 
+    run = db.get(BatchRun, batch_id)
+    run.phase = "running"
+    db.commit()
+
     run_batch(db, case_ids=case_ids, instant=payload.instant)
     summary = batch_summary(db, batch_id)
+
+    run = db.get(BatchRun, batch_id)
+    run.phase = "complete"
+    run.summary = summary or {}
+    db.commit()
+
     return RunBatchResponse(
         batch_id=batch_id,
         n_customers=len(customers),

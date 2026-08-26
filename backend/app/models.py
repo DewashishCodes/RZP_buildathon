@@ -163,6 +163,11 @@ class BatchRun(Base):
     requested_cases: Mapped[int] = mapped_column(default=0)
     # queued -> running -> complete | failed
     phase: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    # Client-supplied dedup key (e.g. an Idempotency-Key-style value) for
+    # POST /batches/run. Unique per merchant (partial index, NULLs allowed)
+    # so a retried request with the same key returns the original batch
+    # instead of seeding a duplicate one - see app/api/batches.py.
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # The batch-scoped rollup (app/audit/rollup.batch_summary) stored once
     # the pipeline completes, so late dashboard reads don't recompute it.

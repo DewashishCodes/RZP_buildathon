@@ -29,6 +29,11 @@ class RunBatchRequest(BaseModel):
     # background task - poll GET /batches/{id}/progress. The response's
     # summary is empty in this mode.
     background: bool = False
+    # Optional client-supplied dedup key. A retry with the same
+    # (merchant_id, idempotency_key) pair returns the original batch
+    # instead of seeding a duplicate one - protects against double
+    # submission (double-click, retried request after a dropped response).
+    idempotency_key: str | None = Field(default=None, max_length=200)
 
 
 class RunBatchResponse(BaseModel):
