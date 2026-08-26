@@ -20,6 +20,7 @@ from google.genai import errors
 
 from app.config import settings
 from app.detection.gemini_client import get_client
+from app.llm_resilience import call_with_resilience
 
 MAX_TURNS = 6  # PRD §10: "capped number of turns (e.g. 6)"
 
@@ -75,7 +76,10 @@ def _format_transcript(turns: list[dict]) -> str:
 
 
 def _generate_turn(prompt: str, client: Any) -> str:
-    response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
+    # Transient errors are retried with backoff inside call_with_resilience;
+    # exhausted retries re-raise and run_conversation keeps the partial
+    # transcript, same as before - just without dropping a turn to one 429.
+    response = call_with_resilience(lambda: client.models.generate_content(model=settings.gemini_model, contents=prompt))
     text = (response.text or "").strip()
     return text or "..."
 
@@ -104,7 +108,7 @@ def run_conversation(case, customer, client: Any = None, max_turns: int = MAX_TU
                 )
                 text = _generate_turn(prompt, client)
                 turns.append({"role": "customer", "text": text})
-    except errors.APIError:
+    except (errors.APIError, OSError):
         if not turns:
             turns.append({"role": "agent", "text": "(call could not be connected - service unavailable)"})
 
@@ -121,8 +125,10 @@ def extract_outcome(turns: list[dict], client: Any = None, now: datetime | None 
     prompt = EXTRACTION_PROMPT.format(transcript=transcript)
 
     try:
-        response = client.models.generate_content(model=settings.gemini_model, contents=prompt)
-    except errors.APIError:
+        response = call_with_resilience(
+            lambda: client.models.generate_content(model=settings.gemini_model, contents=prompt)
+        )
+    except (errors.APIError, OSError):
         return dict(FALLBACK_EXTRACTION)
 
     return _parse_extraction(response.text or "", now)
