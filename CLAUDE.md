@@ -234,12 +234,19 @@ can trip it mid-batch. The existing fail-safe (catches `APIError`, falls
 back to `escalate_human`) handled it gracefully with zero crash, and the
 new `/cases/{id}` drill-down is exactly how you'd notice/diagnose it in
 practice (look for `"LLM proposal was unparseable or invalid; failing
-safe to human escalation."` in an `action_proposed` payload). Not fixed
-here - noted as a real risk for Phase 9 polish if larger batches are
-needed for the final demo (PRD §16 already flagged this as an open risk).
+safe to human escalation."` in an `action_proposed` payload).
 Observed in practice: a live 25-case run showed heavy escalation from
-this; a 10-case run at the same time came out at 80%+ recovery. Keep
-batch runs small (~10-15 cases) until this gets throttling/backoff.
+this; a 10-case run at the same time came out at 80%+ recovery.
+
+**Fixed since**: `app/llm_resilience.py` now wraps every Gemini call with
+a client-side token-bucket rate limiter (`LLM_REQUESTS_PER_MINUTE`,
+default 15), retry with exponential backoff on transient errors (429/5xx/
+timeouts, honoring the server's `Retry-After` header), and a classification
+cache keyed on the raw failure message (`app/detection/llm_classifier.py`
+- identical messages recur constantly in synthetic data, so this removes
+most classifier calls per batch). Only exhausted retries still reach the
+fail-safe fallbacks; keep batches modest anyway since free-tier *daily*
+quotas can't be paced around.
 
 ### Frontend (dashboard, run, case drill-down)
 
@@ -442,6 +449,101 @@ rate-limit guidance.
 | `GEMINI_API_KEY` | Gemini API key for detection/policy/voice LLM calls |
 | `GEMINI_MODEL` | Gemini model id (default `gemini-3.5-flash-lite` — see the rate-limit notes above) |
 | `ENABLE_LIVE_LLM_TESTS` | `true` to run real-Gemini smoke tests |
+| `LLM_REQUESTS_PER_MINUTE` | Client-side token-bucket cap for Gemini calls (`app/llm_resilience.py`, default 15; 0 disables pacing) |
+| `LLM_MAX_ATTEMPTS` | Retry attempts for transient LLM errors (default 3) |
+| `LLM_BACKOFF_BASE_SECONDS` | Exponential-backoff base in seconds (default 2.0) |
+
+### Correctness hardening (Aug 25)
+
+A review pass fixed five latent issues; tests cover each:
+
+- **Sim-clock leak** — `_normalize_retry_params` built retry dates from
+  wall clock while the runner advances a simulated clock days ahead, so
+  LLM-chosen retry offsets were silently discarded. The runner's clock now
+  threads through `decide_action` into `propose_action`.
+- **Uncommitted audit events** — the runner's `no_action` branch returned
+  without committing, leaving that round's AuditEvents pending until an
+  arbitrary later commit (lost on crash). It commits like every other branch.
+- **Naive datetime defaults** — `Case.created_at`/`Attempt.timestamp` used
+  deprecated Python-side `datetime.utcnow`; both are server-side `now()`
+  now (migration `a1f2c3d4e5b6`, which also adds the missing indexes:
+  `attempts.case_id`, `audit_events.case_id/event_type`,
+  `cases.status/created_at`).
+- **Cumulative summary footgun** — `run_batch`'s returned summary aggregated
+  the whole cases table (cumulative across every seed run ever), while the
+  API route recomputed batch-scoped numbers. It's scoped to exactly the
+  cases the run processed now, so CLI scripts and the API agree.
+- **Unbounded inputs** — `n_cases` capped at 500 server-side (422 beyond),
+  `GET /cases`/`GET /tickets` limit capped and offset-paginated, and
+  status/type filters validated against the taxonomy (400 on typos instead
+  of silently-empty results).
+
+Also: the runner eager-loads customer+attempts per batch fetch (was an N+1),
+and `tests/conftest.py` disables rate-limit/backoff sleeps via env vars so
+the suite stays fast.
+
+## Phase 10: background batches, live progress, demo-surface upgrades
+
+### Background batch runs (POST /batches/run `background: true`)
+
+The pipeline used to run synchronously inside the HTTP request — an n=200
+batch held the connection open for minutes of paced Gemini calls, and the
+/run page showed a static "Running…" with no feedback. Now:
+
+- `POST /batches/run` accepts `"background": true` (default false — the
+  sync contract and all existing tests are unchanged): it seeds the batch,
+  returns `{batch_id}` immediately (observed ~200ms), and runs the pipeline
+  as a FastAPI BackgroundTask.
+- A new `BatchRun` model + table (`migration b7e8d2a4c9f1`) tracks the
+  lifecycle: queued → running → complete|failed, with the final rollup
+  stored in `BatchRun.summary` on completion and any exception captured as
+  `error` instead of vanishing into a detached thread. Legacy sync batches
+  have no row; their progress derives purely from case statuses.
+- `GET /batches/{id}/progress` reports live counts straight off the cases
+  table (`total/resolved/recovered_cases`, `recovered_amount`,
+  `at_risk_amount`) so numbers tick up while the agent works.
+- Frontend `/run` posts in background mode and polls progress every 1.5s,
+  showing a live progress bar + ticking ₹ recovered; the dashboard polls
+  every 4s while any case is still open/recovering, then stops.
+
+### Demo-surface additions
+
+- **`GET /batches/{id}/guardrails`** (`app/audit/rollup.py:guardrail_interventions`)
+  — every stopping-rule fire + compliance substitution in the batch,
+  newest first, with rule name and reason. The dashboard renders this as
+  the "Guardrails in action" feed (`components/guardrail-feed.tsx`),
+  turning the two proof counters into clickable stories.
+- **`GET /batches/{id}/curve`** (`recovery_curve`) — cumulative ₹
+  recovered at each recovery moment. Rendered as a hand-drawn inline-SVG
+  rising line (`components/recovery-chart.tsx`, zero chart deps).
+- **"Why this action?" card** on `/cases/[id]` — surfaces the first
+  `action_proposed` rationale plus its compliance verdict above the fold;
+  answers the first question judges ask without scrolling the timeline.
+- **Chat-bubble transcripts + browser TTS** (`components/call-transcript.tsx`)
+  — voice transcripts render as agent/customer chat bubbles with a
+  "Play agent audio" button using the Web Speech API (prefers a hi-IN
+  voice). This delivers PRD §10's deferred Sarvam-TTS stretch goal at zero
+  cost; the extraction pipeline is untouched.
+- **Interleaved timeline** — AuditEvents and Attempts now merge into one
+  chronological thread in `/cases/[id]` (they were two disconnected
+  sections), each attempt carrying its transcript inline.
+- **One-click demo mode** — the landing page's "Run demo batch" button goes
+  to `/run?demo=1` (prefills n=10, seed=42); when the batch finishes, the
+  page auto-derives the PRD §15 drill-downs (recovered insufficient_funds
+  case, card_expired link case, DND substitution from the guardrails feed,
+  escalated cases) into a click-to-story list, so the live walkthrough is
+  one click per beat instead of hunting through tables.
+
+### Test suite notes
+
+`tests/test_llm_resilience.py` covers retry/backoff/rate-limit/Retry-After
+classification; `tests/test_api_batches.py` covers the background flow
+including the failure path (pipeline exception → `phase="failed"` +
+error on the row, HTTP still 200); `tests/test_dashboard_extras.py`
+covers the feed and curve queries including cross-batch isolation.
+Note for future work: DB-backed tests still write to the dev Postgres —
+the conftest only disables LLM pacing; transaction-per-test isolation is
+the known next step.
 
 ## Phase status
 
