@@ -31,6 +31,17 @@ export interface RunBatchResponse {
   summary: BatchSummary;
 }
 
+export interface BatchProgress {
+  batch_id: string;
+  phase: "queued" | "running" | "complete" | "failed";
+  total_cases: number;
+  resolved_cases: number;
+  recovered_cases: number;
+  recovered_amount: number;
+  at_risk_amount: number;
+  error: string | null;
+}
+
 export interface CaseSummary {
   id: string;
   type: string;
@@ -94,6 +105,20 @@ export interface RunDueJobsResponse {
   rescheduled: number;
 }
 
+export interface GuardrailIntervention {
+  case_id: string;
+  timestamp: string | null;
+  kind: "stopping_rule" | "compliance_substitution";
+  rule: string | null;
+  reason: string | null;
+  event_type: string;
+}
+
+export interface CurvePoint {
+  timestamp: string | null;
+  cumulative_recovered: number;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -116,6 +141,7 @@ export function runBatch(params: {
   nCases: number;
   seed: number | null;
   instant?: boolean;
+  background?: boolean;
 }): Promise<RunBatchResponse> {
   return apiFetch<RunBatchResponse>("/batches/run", {
     method: "POST",
@@ -124,12 +150,42 @@ export function runBatch(params: {
       n_cases: params.nCases,
       seed: params.seed,
       instant: params.instant ?? true,
+      background: params.background ?? false,
     }),
   });
 }
 
+export function getBatchProgress(batchId: string): Promise<BatchProgress> {
+  return apiFetch<BatchProgress>(`/batches/${batchId}/progress`);
+}
+
 export function getBatchSummary(batchId: string): Promise<BatchSummary> {
   return apiFetch<BatchSummary>(`/batches/${batchId}/summary`);
+}
+
+export interface BatchListItem {
+  batch_id: string;
+  phase: string;
+  created_at: string | null;
+  total_cases: number;
+  total_at_risk: number;
+  total_recovered: number;
+  recovery_rate: number;
+}
+
+export function listBatches(merchantId?: string): Promise<BatchListItem[]> {
+  const q = new URLSearchParams();
+  if (merchantId) q.set("merchant_id", merchantId);
+  const qs = q.toString();
+  return apiFetch<BatchListItem[]>(`/batches${qs ? `?${qs}` : ""}`);
+}
+
+export function getBatchGuardrails(batchId: string): Promise<GuardrailIntervention[]> {
+  return apiFetch<GuardrailIntervention[]>(`/batches/${batchId}/guardrails`);
+}
+
+export function getBatchCurve(batchId: string): Promise<CurvePoint[]> {
+  return apiFetch<CurvePoint[]>(`/batches/${batchId}/curve`);
 }
 
 export function listCases(params: {
@@ -145,6 +201,12 @@ export function listCases(params: {
   if (params.type) q.set("type", params.type);
   const qs = q.toString();
   return apiFetch<CaseSummary[]>(`/cases${qs ? `?${qs}` : ""}`);
+}
+
+export interface DemoStop {
+  label: string;
+  description: string;
+  href: string;
 }
 
 export function listScheduledCases(merchantId: string): Promise<CaseSummary[]> {
