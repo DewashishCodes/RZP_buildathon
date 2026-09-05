@@ -20,7 +20,7 @@ the reasoning + guardrail + measurement loop rather than real payment
 processing. `POST /webhooks/razorpay` (below) is the one place a real
 Razorpay event *would* land.
 
-**[Watch the 5-min demo video](https://youtu.be/TJOCuPYJ0XM)**
+**[Watch the demo video](https://youtu.be/TJOCuPYJ0XM)** (1:29)
 
 ## Architecture
 
