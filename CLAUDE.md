@@ -707,8 +707,19 @@ this touch the real world" questions.
 | 7 | Audit trail storage + dashboard API | Done |
 | 8 | Frontend (dashboard, run, case drill-down) | Done |
 | 9 | Seed-guarantee, polish, demo rehearsal | Done |
+| 10 | Background batches, live progress, demo-surface upgrades | Done |
+| — | Pre-public hardening (Track C), real-world credibility (Track B), demo reliability (Track A) | Done |
+| 11 | README overhaul (features, integration, business value), demo video, submission | Done |
 
 Full phase plan: `C:\Users\Dewashish Lambore\.claude\plans\go-through-the-prd-snuggly-cerf.md`
+
+## Submission status
+
+Submitted to the Razorpay Buildathon (Track 03). Demo video (1:29):
+https://youtu.be/TJOCuPYJ0XM — embedded live on the landing page (`/`) and
+linked from the README. No further feature work is planned against this
+repo; any future session picking this back up should treat it as
+post-submission maintenance/polish, not active phase development.
 
 ## Conventions
 
