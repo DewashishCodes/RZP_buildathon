@@ -221,5 +221,5 @@ Full incident-level detail — plus every phase's design rationale — is in
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/DewashishCodes"><strong>Dewashish</strong></a> for the Razorpay Buildathon (Track 03)
+  Built by <a href="https://github.com/DewashishCodes"><strong>DewashishCodes</strong></a> for the Razorpay Buildathon (Track 03)
 </p>
