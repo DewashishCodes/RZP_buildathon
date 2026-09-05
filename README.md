@@ -217,3 +217,9 @@ Full incident-level detail — plus every phase's design rationale — is in
 /revenue-recovery-agent-prd.md   Full product spec
 /CLAUDE.md    Build log: every phase, route, and design decision
 ```
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/DewashishCodes"><strong>Dewashish</strong></a> for the Razorpay Buildathon (Track 03)
+</p>
